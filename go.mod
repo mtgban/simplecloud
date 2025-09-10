@@ -5,6 +5,9 @@ go 1.24.5
 require (
 	cloud.google.com/go/storage v1.56.1
 	github.com/Backblaze/blazer v0.7.2
+	github.com/dsnet/compress v0.0.1
+	github.com/ulikunitz/xz v0.5.15
+	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	google.golang.org/api v0.249.0
 )
 
