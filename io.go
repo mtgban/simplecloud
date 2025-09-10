@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"net/url"
 	"strings"
 
 	bzip2Writer "github.com/dsnet/compress/bzip2"
@@ -30,7 +31,12 @@ func (m *MultiCloser) Close() error {
 }
 
 func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser, error) {
-	reader, err := bucket.NewReader(ctx, path)
+	u, err := url.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err := bucket.NewReader(ctx, u.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +72,12 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 }
 
 func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser, error) {
-	writer, err := bucket.NewWriter(ctx, path)
+	u, err := url.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+
+	writer, err := bucket.NewWriter(ctx, u.Path)
 	if err != nil {
 		return nil, err
 	}
