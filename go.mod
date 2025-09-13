@@ -1,6 +1,6 @@
 module github.com/mtgban/simplecloud
 
-go 1.24.5
+go 1.24.3
 
 require (
 	cloud.google.com/go/storage v1.56.1
