@@ -42,17 +42,17 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 	}
 
 	var decoder io.ReadCloser
-	if strings.HasSuffix(path, "xz") {
+	if strings.HasSuffix(path, ".xz") {
 		xzReader, err := xzReader.NewReader(reader, 0)
 		if err != nil {
 			reader.Close()
 			return nil, err
 		}
 		decoder = io.NopCloser(xzReader)
-	} else if strings.HasSuffix(path, "bz2") {
+	} else if strings.HasSuffix(path, ".bz2") {
 		bz2Reader := bzip2.NewReader(reader)
 		decoder = io.NopCloser(bz2Reader)
-	} else if strings.HasSuffix(path, "gz") {
+	} else if strings.HasSuffix(path, ".gz") {
 		gzipReader, err := gzip.NewReader(reader)
 		if err != nil {
 			reader.Close()
