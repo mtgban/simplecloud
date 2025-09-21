@@ -111,3 +111,19 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 		closers: []io.Closer{encoder, writer},
 	}, nil
 }
+
+func Copy(ctx context.Context, src Reader, dst Writer, srcPath, dstPath string) (int64, error) {
+	r, err := InitReader(ctx, src, srcPath)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+
+	w, err := InitWriter(ctx, dst, dstPath)
+	if err != nil {
+		return 0, err
+	}
+	defer w.Close()
+
+	return io.Copy(w, r)
+}
