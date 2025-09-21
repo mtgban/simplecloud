@@ -2,6 +2,7 @@ package simplecloud
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -41,6 +42,12 @@ func (h *HTTPBucket) NewReader(ctx context.Context, path string) (io.ReadCloser,
 	resp, err := h.Client.Do(req)
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("GET %s: %s", u.Redacted(), resp.Status)
 	}
 
 	return resp.Body, nil
