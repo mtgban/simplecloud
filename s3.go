@@ -7,18 +7,31 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type S3Bucket struct {
-	Client   *s3.Client
-	Uploader *manager.Uploader
+	client   *s3.Client
+	uploader *manager.Uploader
 	Bucket   string
 }
 
-func NewS3Client(ctx context.Context, bucketName, endpoint, region string) (*S3Bucket, error) {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+func NewS3Client(ctx context.Context, accessKey, secretKey, bucketName, endpoint, region string) (*S3Bucket, error) {
+	if region == "" {
+		region = "auto"
+	}
+	opts := []func(*config.LoadOptions) error{
+		config.WithRegion(region),
+	}
+	if accessKey != "" && secretKey != "" {
+		opts = append(opts, config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+		))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -33,8 +46,8 @@ func NewS3Client(ctx context.Context, bucketName, endpoint, region string) (*S3B
 	uploader := manager.NewUploader(client)
 
 	return &S3Bucket{
-		Client:   client,
-		Uploader: uploader,
+		client:   client,
+		uploader: uploader,
 		Bucket:   bucketName,
 	}, nil
 }
@@ -42,7 +55,7 @@ func NewS3Client(ctx context.Context, bucketName, endpoint, region string) (*S3B
 func (s *S3Bucket) NewReader(ctx context.Context, path string) (io.ReadCloser, error) {
 	key := strings.TrimLeft(path, "/")
 
-	resp, err := s.Client.GetObject(ctx, &s3.GetObjectInput{
+	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &s.Bucket,
 		Key:    &key,
 	})
@@ -79,7 +92,7 @@ func (s *S3Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, 
 	ctx, cancel := context.WithCancel(ctx)
 
 	go func() {
-		_, err := s.Uploader.Upload(ctx, &s3.PutObjectInput{
+		_, err := s.uploader.Upload(ctx, &s3.PutObjectInput{
 			Bucket: &s.Bucket,
 			Key:    &key,
 			Body:   pr,
