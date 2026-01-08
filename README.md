@@ -16,7 +16,7 @@ go get github.com/mtgban/simplecloud
 | HTTP/HTTPS | ✓ | — | `NewHTTPBucket(client, baseURL)` |
 | Backblaze B2 | ✓ | ✓ | `NewB2Client(ctx, accessKey, secretKey, bucket)` |
 | Google Cloud Storage | ✓ | ✓ | `NewGCSClient(ctx, serviceAccountFile, bucket)` |
-| Amazon S3 | ✓ | ✓ | `NewS3Client(ctx, bucket, endpoint, region)` |
+| Amazon S3 | ✓ | ✓ | `NewS3Client(ctx, accessKey, secretKey, bucket, endpoint, region)` |
 
 ## Usage
 
