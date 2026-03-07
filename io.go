@@ -123,7 +123,11 @@ func Copy(ctx context.Context, src Reader, dst Writer, srcPath, dstPath string) 
 	if err != nil {
 		return 0, err
 	}
-	defer w.Close()
 
-	return io.Copy(w, r)
+	n, err := io.Copy(w, r)
+	closeErr := w.Close()
+	if closeErr != nil && err == nil {
+		err = closeErr
+	}
+	return n, err
 }
