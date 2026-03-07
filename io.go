@@ -42,17 +42,17 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 	}
 
 	var decoder io.ReadCloser
-	if strings.HasSuffix(path, ".xz") {
+	if strings.HasSuffix(u.Path, ".xz") {
 		xzReader, err := xzReader.NewReader(reader, 0)
 		if err != nil {
 			reader.Close()
 			return nil, err
 		}
 		decoder = io.NopCloser(xzReader)
-	} else if strings.HasSuffix(path, ".bz2") {
+	} else if strings.HasSuffix(u.Path, ".bz2") {
 		bz2Reader := bzip2.NewReader(reader)
 		decoder = io.NopCloser(bz2Reader)
-	} else if strings.HasSuffix(path, ".gz") {
+	} else if strings.HasSuffix(u.Path, ".gz") {
 		gzipReader, err := gzip.NewReader(reader)
 		if err != nil {
 			reader.Close()
@@ -83,21 +83,21 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 	}
 
 	var encoder io.WriteCloser
-	if strings.HasSuffix(path, ".xz") {
+	if strings.HasSuffix(u.Path, ".xz") {
 		xzWriter, err := xz.NewWriter(writer)
 		if err != nil {
 			writer.Close()
 			return nil, err
 		}
 		encoder = xzWriter
-	} else if strings.HasSuffix(path, ".bz2") {
+	} else if strings.HasSuffix(u.Path, ".bz2") {
 		bz2Writer, err := bzip2Writer.NewWriter(writer, nil)
 		if err != nil {
 			writer.Close()
 			return nil, err
 		}
 		encoder = bz2Writer
-	} else if strings.HasSuffix(path, ".gz") {
+	} else if strings.HasSuffix(u.Path, ".gz") {
 		gzipWriter := gzip.NewWriter(writer)
 		encoder = gzipWriter
 	}
