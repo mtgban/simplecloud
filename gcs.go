@@ -13,11 +13,19 @@ type GCSBucket struct {
 	Bucket *storage.BucketHandle
 }
 
-// NewGCSClient creates a GCS client authenticated via the given service account
-// JSON file and opens the named bucket. The underlying storage.Client is not
-// exposed; callers that need to close it should construct one directly.
+// NewGCSClient creates a GCS client and opens the named bucket. If
+// serviceAccountFile is non-empty it is used for authentication; otherwise
+// Application Default Credentials are used, which works automatically in GKE,
+// Cloud Run, and locally via `gcloud auth application-default login`. The
+// underlying storage.Client is not exposed; callers that need to close it
+// should construct one directly.
 func NewGCSClient(ctx context.Context, serviceAccountFile, bucketName string) (*GCSBucket, error) {
-	client, err := storage.NewClient(ctx, option.WithCredentialsFile(serviceAccountFile))
+	var opts []option.ClientOption
+	if serviceAccountFile != "" {
+		opts = append(opts, option.WithCredentialsFile(serviceAccountFile))
+	}
+
+	client, err := storage.NewClient(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
