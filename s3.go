@@ -88,7 +88,10 @@ func (w *s3PipeWriter) Write(p []byte) (int, error) {
 
 func (w *s3PipeWriter) Close() error {
 	w.pw.Close()
-	err := <-w.done
+	err, ok := <-w.done
+	if ok {
+		close(w.done)
+	}
 	w.cancel()
 	return err
 }
@@ -122,4 +125,3 @@ func (s *S3Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, 
 		cancel: cancel,
 	}, nil
 }
-
