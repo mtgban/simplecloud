@@ -13,6 +13,10 @@ import (
 	xzReader "github.com/xi2/xz"
 )
 
+// MultiCloser composes an io.Reader or io.Writer with multiple Closers that
+// must all be closed in order. It is used internally by InitReader and
+// InitWriter to close both the compression layer and the underlying storage
+// stream in the correct sequence.
 type MultiCloser struct {
 	io.Reader
 	io.Writer
@@ -30,6 +34,15 @@ func (m *MultiCloser) Close() error {
 	return first
 }
 
+// InitReader opens path from bucket for reading, wrapping the stream in a
+// decompressor when the path extension is recognised:
+//
+//   - .gz  — gzip
+//   - .bz2 — bzip2
+//   - .xz  — xz/lzma
+//
+// The path may be a full URL; only the path component is passed to the bucket.
+// The caller must close the returned ReadCloser when done.
 func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser, error) {
 	u, err := url.Parse(path)
 	if err != nil {
@@ -71,6 +84,16 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 	}, nil
 }
 
+// InitWriter opens path on bucket for writing, wrapping the stream in a
+// compressor when the path extension is recognised:
+//
+//   - .gz  — gzip
+//   - .bz2 — bzip2
+//   - .xz  — xz/lzma
+//
+// The path may be a full URL; only the path component is passed to the bucket.
+// The caller must call Close on the returned WriteCloser when done; for cloud
+// backends this is what commits the upload.
 func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser, error) {
 	u, err := url.Parse(path)
 	if err != nil {
@@ -112,6 +135,15 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 	}, nil
 }
 
+// Copy reads from srcPath on src and writes to dstPath on dst, using
+// InitReader and InitWriter so that compression and decompression are applied
+// automatically based on the path extensions. This means formats can be
+// transcoded in a single call — e.g. copying a .gz source to a .xz
+// destination will decompress and recompress on the fly.
+//
+// The returned count is the number of uncompressed bytes transferred between
+// the reader and writer, not the number of bytes read from or written to
+// storage.
 func Copy(ctx context.Context, src Reader, dst Writer, srcPath, dstPath string) (int64, error) {
 	r, err := InitReader(ctx, src, srcPath)
 	if err != nil {

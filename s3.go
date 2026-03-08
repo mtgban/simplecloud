@@ -12,12 +12,19 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+// S3Bucket implements Reader and Writer for an Amazon S3 bucket (or any
+// S3-compatible object store).
 type S3Bucket struct {
 	client   *s3.Client
 	uploader *manager.Uploader
 	Bucket   string
 }
 
+// NewS3Client creates an S3 client for the named bucket. accessKey and
+// secretKey are optional; if both are empty, the default AWS credential chain
+// is used. endpoint may be set to target S3-compatible stores (e.g.
+// Cloudflare R2, MinIO); path-style addressing is enabled automatically when
+// an endpoint is provided. region defaults to "auto" if empty.
 func NewS3Client(ctx context.Context, accessKey, secretKey, bucketName, endpoint, region string) (*S3Bucket, error) {
 	if region == "" {
 		region = "auto"
@@ -52,6 +59,8 @@ func NewS3Client(ctx context.Context, accessKey, secretKey, bucketName, endpoint
 	}, nil
 }
 
+// NewReader opens the object at path in the bucket for reading. A leading
+// slash in path is stripped before the request is made.
 func (s *S3Bucket) NewReader(ctx context.Context, path string) (io.ReadCloser, error) {
 	key := strings.TrimLeft(path, "/")
 
@@ -84,6 +93,11 @@ func (w *s3PipeWriter) Close() error {
 	return err
 }
 
+// NewWriter opens the object at path in the bucket for writing using a
+// background goroutine and an io.Pipe so that data is streamed to S3 without
+// buffering the entire payload in memory. A leading slash in path is stripped.
+// The caller must call Close when done; Close blocks until the upload completes
+// and returns any upload error.
 func (s *S3Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, error) {
 	key := strings.TrimLeft(path, "/")
 
