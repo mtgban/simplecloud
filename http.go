@@ -17,8 +17,12 @@ type HTTPBucket struct {
 
 // NewHTTPBucket constructs an HTTPBucket with the given base URL. The scheme,
 // host, and any credentials are reused for every request; the path component
-// is replaced per call to NewReader.
+// is replaced per call to NewReader. If client is nil, http.DefaultClient is
+// used.
 func NewHTTPBucket(client *http.Client, path string) (*HTTPBucket, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
 	u, err := url.Parse(path)
 	if err != nil {
 		return nil, err
