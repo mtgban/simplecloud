@@ -73,6 +73,14 @@ if err := writer.Close(); err != nil {
 }
 ```
 
+### HTTP base paths
+
+The base URL passed to `NewHTTPBucket` may include a path prefix, which is
+preserved on every request; the per-call path is joined onto it. For example, a
+base of `https://host/v1` reading `/data.json` requests
+`https://host/v1/data.json`. Any credentials in the base URL are reused and
+redacted from error messages.
+
 ## Transparent Compression
 
 Use `InitReader` and `InitWriter` to automatically handle compressed files based on extension:

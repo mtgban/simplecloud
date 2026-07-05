@@ -16,9 +16,9 @@ type HTTPBucket struct {
 }
 
 // NewHTTPBucket constructs an HTTPBucket with the given base URL. The scheme,
-// host, and any credentials are reused for every request; the path component
-// is replaced per call to NewReader. If client is nil, http.DefaultClient is
-// used.
+// host, any credentials, and any base path are reused for every request; the
+// per-call path is joined onto the base path in NewReader. If client is nil,
+// http.DefaultClient is used.
 func NewHTTPBucket(client *http.Client, path string) (*HTTPBucket, error) {
 	if client == nil {
 		client = http.DefaultClient
@@ -33,18 +33,15 @@ func NewHTTPBucket(client *http.Client, path string) (*HTTPBucket, error) {
 	}, nil
 }
 
-// NewReader issues a GET request for path under the bucket's base URL and
-// returns the response body. Non-2xx responses are returned as an error with
-// the URL redacted. The caller must close the returned ReadCloser when done.
+// NewReader issues a GET request for path joined onto the bucket's base URL and
+// returns the response body. A base path, if any, is preserved as a prefix (so
+// a base of https://host/v1 and a path of /obj.gz requests /v1/obj.gz). Non-2xx
+// responses are returned as an error with the URL redacted. The caller must
+// close the returned ReadCloser when done.
 func (h *HTTPBucket) NewReader(ctx context.Context, path string) (io.ReadCloser, error) {
-	u := new(url.URL)
-	*u = *h.URL
-	if h.URL.User != nil {
-		u.User = new(url.Userinfo)
-		*u.User = *h.URL.User
-	}
-
-	u.Path = path
+	// JoinPath returns a fresh *url.URL, copying scheme, host, and credentials
+	// without mutating the bucket's base URL.
+	u := h.URL.JoinPath(path)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
