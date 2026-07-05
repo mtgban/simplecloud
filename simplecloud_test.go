@@ -114,6 +114,31 @@ func TestHTTPBucket_NonSuccessStatus(t *testing.T) {
 	}
 }
 
+func TestHTTPBucket_BasePathPrefix(t *testing.T) {
+	// A base URL with a path prefix should be preserved; the per-call path is
+	// joined onto it rather than replacing it.
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		io.WriteString(w, "ok")
+	}))
+	defer srv.Close()
+
+	bucket, err := simplecloud.NewHTTPBucket(nil, srv.URL+"/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := bucket.NewReader(ctx, "/obj.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+
+	if want := "/v1/obj.txt"; gotPath != want {
+		t.Fatalf("server saw path %q, want %q", gotPath, want)
+	}
+}
+
 func TestHTTPBucket_NilClient(t *testing.T) {
 	// NewHTTPBucket(nil, ...) should not panic; NewReader should work.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +241,53 @@ func TestInitReader_UnknownExtension(t *testing.T) {
 	}
 	if got := readAll(t, r); got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestInitReader_SpecialCharsInPath(t *testing.T) {
+	// Filenames containing '%' or '#' are legal on disk and in object keys.
+	// They must not trip up query stripping or extension detection: the file
+	// should still be compressed (.gz applied) and round-trip cleanly.
+	names := []string{
+		"data50%off.json.gz",
+		"report#3.json.gz",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			bucket := &simplecloud.FileBucket{}
+			path := filepath.Join(dir, name)
+			const want = "special chars content"
+
+			w, err := simplecloud.InitWriter(ctx, bucket, path)
+			if err != nil {
+				t.Fatalf("InitWriter: %v", err)
+			}
+			if _, err := io.WriteString(w, want); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			// The on-disk file must actually be gzip-compressed, proving the
+			// ".gz" suffix was detected despite the '%'/'#' in the name.
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Equal(raw, []byte(want)) {
+				t.Fatal("file appears uncompressed: extension detection failed")
+			}
+
+			r, err := simplecloud.InitReader(ctx, bucket, path)
+			if err != nil {
+				t.Fatalf("InitReader: %v", err)
+			}
+			if got := readAll(t, r); got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		})
 	}
 }
 

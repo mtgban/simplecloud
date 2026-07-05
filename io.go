@@ -13,6 +13,24 @@ import (
 	xzReader "github.com/xi2/xz"
 )
 
+// cleanPath reduces a path to the object key used for storage access and
+// extension-based compression detection. A trailing query string (e.g. a
+// presigned-URL signature) is always dropped. When the path is a full HTTP(S)
+// URL only its path component is kept, matching the documented contract.
+//
+// It deliberately avoids running arbitrary paths through url.Parse, which
+// rejects '%' as an invalid escape and swallows '#...' as a URL fragment —
+// both legal characters in local file paths and object keys.
+func cleanPath(path string) string {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		if u, err := url.Parse(path); err == nil {
+			return u.Path
+		}
+	}
+	before, _, _ := strings.Cut(path, "?")
+	return before
+}
+
 // MultiCloser composes an io.Reader or io.Writer with multiple Closers that
 // must all be closed in order. It is used internally by InitReader and
 // InitWriter to close both the compression layer and the underlying storage
@@ -44,28 +62,25 @@ func (m *MultiCloser) Close() error {
 // The path may be a full URL; only the path component is passed to the bucket.
 // The caller must close the returned ReadCloser when done.
 func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser, error) {
-	u, err := url.Parse(path)
-	if err != nil {
-		return nil, err
-	}
+	key := cleanPath(path)
 
-	reader, err := bucket.NewReader(ctx, u.Path)
+	reader, err := bucket.NewReader(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 
 	var decoder io.ReadCloser
-	if strings.HasSuffix(u.Path, ".xz") {
+	if strings.HasSuffix(key, ".xz") {
 		xzReader, err := xzReader.NewReader(reader, 0)
 		if err != nil {
 			reader.Close()
 			return nil, err
 		}
 		decoder = io.NopCloser(xzReader)
-	} else if strings.HasSuffix(u.Path, ".bz2") {
+	} else if strings.HasSuffix(key, ".bz2") {
 		bz2Reader := bzip2.NewReader(reader)
 		decoder = io.NopCloser(bz2Reader)
-	} else if strings.HasSuffix(u.Path, ".gz") {
+	} else if strings.HasSuffix(key, ".gz") {
 		gzipReader, err := gzip.NewReader(reader)
 		if err != nil {
 			reader.Close()
@@ -95,32 +110,29 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 // The caller must call Close on the returned WriteCloser when done; for cloud
 // backends this is what commits the upload.
 func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser, error) {
-	u, err := url.Parse(path)
-	if err != nil {
-		return nil, err
-	}
+	key := cleanPath(path)
 
-	writer, err := bucket.NewWriter(ctx, u.Path)
+	writer, err := bucket.NewWriter(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 
 	var encoder io.WriteCloser
-	if strings.HasSuffix(u.Path, ".xz") {
+	if strings.HasSuffix(key, ".xz") {
 		xzWriter, err := xz.NewWriter(writer)
 		if err != nil {
 			writer.Close()
 			return nil, err
 		}
 		encoder = xzWriter
-	} else if strings.HasSuffix(u.Path, ".bz2") {
+	} else if strings.HasSuffix(key, ".bz2") {
 		bz2Writer, err := bzip2Writer.NewWriter(writer, nil)
 		if err != nil {
 			writer.Close()
 			return nil, err
 		}
 		encoder = bz2Writer
-	} else if strings.HasSuffix(u.Path, ".gz") {
+	} else if strings.HasSuffix(key, ".gz") {
 		gzipWriter := gzip.NewWriter(writer)
 		encoder = gzipWriter
 	}
