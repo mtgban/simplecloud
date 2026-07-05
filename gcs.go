@@ -3,6 +3,7 @@ package simplecloud
 import (
 	"context"
 	"io"
+	"strings"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/option"
@@ -37,14 +38,19 @@ func NewGCSClient(ctx context.Context, serviceAccountFile, bucketName string) (*
 	}, nil
 }
 
-// NewReader opens the object at path in the bucket for reading.
+// NewReader opens the object at path in the bucket for reading. A leading slash
+// is stripped so keys match the S3 and B2 backends; the GCS client would
+// otherwise treat "/foo" as an object literally named "/foo".
 func (g *GCSBucket) NewReader(ctx context.Context, path string) (io.ReadCloser, error) {
-	return g.Bucket.Object(path).NewReader(ctx)
+	key := strings.TrimLeft(path, "/")
+	return g.Bucket.Object(key).NewReader(ctx)
 }
 
-// NewWriter opens the object at path in the bucket for writing. The caller
-// must call Close when done; Close is what commits the object to GCS.
+// NewWriter opens the object at path in the bucket for writing. A leading slash
+// is stripped (see NewReader). The caller must call Close when done; Close is
+// what commits the object to GCS.
 func (g *GCSBucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, error) {
-	obj := g.Bucket.Object(path).NewWriter(ctx)
+	key := strings.TrimLeft(path, "/")
+	obj := g.Bucket.Object(key).NewWriter(ctx)
 	return obj, nil
 }

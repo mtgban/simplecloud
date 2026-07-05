@@ -59,8 +59,9 @@ func NewS3Client(ctx context.Context, accessKey, secretKey, bucketName, endpoint
 	}, nil
 }
 
-// NewReader opens the object at path in the bucket for reading. A leading
-// slash in path is stripped before the request is made.
+// NewReader opens the object at path in the bucket for reading. A leading slash
+// is stripped: aws-sdk-go-v2 does not canonicalise keys, and reads with
+// leading/double slashes 404 (aws/aws-sdk-go#2559).
 func (s *S3Bucket) NewReader(ctx context.Context, path string) (io.ReadCloser, error) {
 	key := strings.TrimLeft(path, "/")
 
@@ -98,9 +99,11 @@ func (w *s3PipeWriter) Close() error {
 
 // NewWriter opens the object at path in the bucket for writing using a
 // background goroutine and an io.Pipe so that data is streamed to S3 without
-// buffering the entire payload in memory. A leading slash in path is stripped.
-// The caller must call Close when done; Close blocks until the upload completes
-// and returns any upload error.
+// buffering the entire payload in memory. A leading slash is stripped:
+// aws-sdk-go-v2 Upload/PutObject silently succeeds without storing anything
+// when the key begins with a slash (aws/aws-sdk-go-v2#1701), so the strip
+// prevents silent data loss. The caller must call Close when done; Close blocks
+// until the upload completes and returns any upload error.
 func (s *S3Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, error) {
 	key := strings.TrimLeft(path, "/")
 
