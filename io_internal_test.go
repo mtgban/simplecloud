@@ -19,6 +19,8 @@ func TestCleanPath(t *testing.T) {
 		{"percent preserved in key", "b2://bucket/dir/a%b.gz", "/dir/a%b.gz"},
 		{"hash preserved in key", "b2://bucket/dir/a#b.gz", "/dir/a#b.gz"},
 		{"percent preserved local", "/data/a%b.gz", "/data/a%b.gz"},
+		{"colon preserved in key", "2024:report.gz", "2024:report.gz"},
+		{"empty", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
