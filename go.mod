@@ -2,6 +2,10 @@ module github.com/mtgban/simplecloud
 
 go 1.25.0
 
+// v0.0.10 wrote b2://, gs:// and s3:// objects with the full URL as the
+// object key, because cleanPath only stripped the scheme for http(s) URLs.
+retract v0.0.10
+
 require (
 	cloud.google.com/go/storage v1.56.1
 	github.com/Backblaze/blazer v0.7.2
