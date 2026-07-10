@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
-	"net/url"
 	"strings"
 
 	bzip2Writer "github.com/dsnet/compress/bzip2"
@@ -15,19 +14,26 @@ import (
 
 // cleanPath reduces a path to the object key used for storage access and
 // extension-based compression detection. A trailing query string (e.g. a
-// presigned-URL signature) is always dropped. When the path is a full HTTP(S)
-// URL only its path component is kept, matching the documented contract.
+// presigned-URL signature) is always dropped. When the path is a full URL
+// (b2://, gs://, s3://, http(s)://, …) the scheme and authority are stripped
+// and only the object key is kept, matching the documented contract.
 //
 // It deliberately avoids running arbitrary paths through url.Parse, which
 // rejects '%' as an invalid escape and swallows '#...' as a URL fragment —
 // both legal characters in local file paths and object keys.
 func cleanPath(path string) string {
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		if u, err := url.Parse(path); err == nil {
-			return u.Path
-		}
-	}
 	before, _, _ := strings.Cut(path, "?")
+
+	// Strip a leading scheme://authority for any URL, keeping everything from
+	// the first slash of the path onward (leading slash included; the cloud
+	// backends strip it as needed).
+	if i := strings.Index(before, "://"); i >= 0 {
+		rest := before[i+len("://"):]
+		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+			return rest[slash:]
+		}
+		return ""
+	}
 	return before
 }
 
