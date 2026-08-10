@@ -2,6 +2,7 @@ package simplecloud
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 
@@ -43,7 +44,16 @@ func NewGCSClient(ctx context.Context, serviceAccountFile, bucketName string) (*
 // otherwise treat "/foo" as an object literally named "/foo".
 func (g *GCSBucket) NewReader(ctx context.Context, path string) (io.ReadCloser, error) {
 	key := strings.TrimLeft(path, "/")
-	return g.Bucket.Object(key).NewReader(ctx)
+
+	reader, err := g.Bucket.Object(key).NewReader(ctx)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return nil, errNotExist(err)
+		}
+		return nil, err
+	}
+
+	return reader, nil
 }
 
 // NewWriter opens the object at path in the bucket for writing. A leading slash

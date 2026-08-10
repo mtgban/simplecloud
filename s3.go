@@ -2,6 +2,7 @@ package simplecloud
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 // S3Bucket implements Reader and Writer for an Amazon S3 bucket (or any
@@ -70,6 +72,13 @@ func (s *S3Bucket) NewReader(ctx context.Context, path string) (io.ReadCloser, e
 		Key:    &key,
 	})
 	if err != nil {
+		// NoSuchKey is what GetObject returns; NotFound is what several
+		// S3-compatible stores answer with instead.
+		var noSuchKey *types.NoSuchKey
+		var notFound *types.NotFound
+		if errors.As(err, &noSuchKey) || errors.As(err, &notFound) {
+			return nil, errNotExist(err)
+		}
 		return nil, err
 	}
 

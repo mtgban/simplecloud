@@ -56,7 +56,12 @@ func (h *HTTPBucket) NewReader(ctx context.Context, path string) (io.ReadCloser,
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("GET %s: %s", u.Redacted(), resp.Status)
+
+		err := fmt.Errorf("GET %s: %s", u.Redacted(), resp.Status)
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, errNotExist(err)
+		}
+		return nil, err
 	}
 
 	return resp.Body, nil

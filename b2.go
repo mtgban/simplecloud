@@ -42,7 +42,25 @@ func (b *B2Bucket) NewReader(ctx context.Context, path string) (io.ReadCloser, e
 	src := strings.TrimLeft(path, "/")
 	obj := b.Bucket.Object(src).NewReader(ctx)
 	obj.ConcurrentDownloads = b.ConcurrentDownloads
-	return obj, nil
+	return b2NotFoundReader{obj}, nil
+}
+
+// b2NotFoundReader restates blazer's not-found error as the package's
+// os.ErrNotExist contract. B2 hands back a reader unconditionally and only
+// learns the object is missing when the first range request 404s, so the
+// translation belongs on Read rather than in NewReader. blazer's own
+// IsNotExist is a bare type assertion, hence the check against the error
+// exactly as returned.
+type b2NotFoundReader struct {
+	io.ReadCloser
+}
+
+func (r b2NotFoundReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil && b2.IsNotExist(err) {
+		return n, errNotExist(err)
+	}
+	return n, err
 }
 
 // NewWriter opens the object at path in the bucket for writing. A leading slash
