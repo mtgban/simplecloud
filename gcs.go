@@ -11,6 +11,8 @@ import (
 
 // GCSBucket implements Reader and Writer for a Google Cloud Storage bucket.
 type GCSBucket struct {
+	// Bucket is the underlying GCS bucket handle that reads and writes go
+	// through.
 	Bucket *storage.BucketHandle
 }
 

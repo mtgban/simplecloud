@@ -10,6 +10,8 @@ import (
 
 // B2Bucket implements Reader and Writer for a Backblaze B2 bucket.
 type B2Bucket struct {
+	// Bucket is the underlying blazer bucket handle that reads and writes go
+	// through.
 	Bucket *b2.Bucket
 
 	// ConcurrentDownloads controls how many parallel range requests are used

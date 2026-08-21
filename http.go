@@ -11,8 +11,12 @@ import (
 // HTTPBucket implements Reader for HTTP and HTTPS sources. It does not support
 // writes; use a different backend for upload destinations.
 type HTTPBucket struct {
+	// Client issues the GET requests; if nil at construction, NewHTTPBucket
+	// substitutes http.DefaultClient.
 	Client *http.Client
-	URL    *url.URL
+	// URL is the base URL whose scheme, host, credentials, and path are reused
+	// for every request.
+	URL *url.URL
 }
 
 // NewHTTPBucket constructs an HTTPBucket with the given base URL. The scheme,

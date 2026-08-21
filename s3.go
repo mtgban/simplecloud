@@ -17,7 +17,8 @@ import (
 type S3Bucket struct {
 	client   *s3.Client
 	uploader *manager.Uploader
-	Bucket   string
+	// Bucket is the name of the target S3 bucket.
+	Bucket string
 }
 
 // NewS3Client creates an S3 client for the named bucket. accessKey and
