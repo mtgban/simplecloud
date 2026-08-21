@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mtgban/simplecloud"
@@ -241,6 +242,22 @@ func TestInitReader_UnknownExtension(t *testing.T) {
 	}
 	if got := readAll(t, r); got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestInitReader_WrapsErrorPreservingIs(t *testing.T) {
+	// A failure from the backend must be wrapped with package context while
+	// remaining inspectable via errors.Is (i.e. wrapped with %w, not %s).
+	bucket := &simplecloud.FileBucket{}
+	_, err := simplecloud.InitReader(ctx, bucket, "/nonexistent/simplecloud/file.json.gz")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("wrapped error should preserve os.ErrNotExist, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "simplecloud:") {
+		t.Errorf("error should carry package context, got %q", err.Error())
 	}
 }
 

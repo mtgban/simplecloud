@@ -4,6 +4,7 @@ import (
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 
@@ -37,17 +38,18 @@ func cleanPath(path string) string {
 	return before
 }
 
-// MultiCloser composes an io.Reader or io.Writer with multiple Closers that
+// multiCloser composes an io.Reader or io.Writer with multiple Closers that
 // must all be closed in order. It is used internally by InitReader and
 // InitWriter to close both the compression layer and the underlying storage
 // stream in the correct sequence.
-type MultiCloser struct {
+type multiCloser struct {
 	io.Reader
 	io.Writer
 	closers []io.Closer
 }
 
-func (m *MultiCloser) Close() error {
+// Close closes every wrapped Closer in order and returns the first error.
+func (m *multiCloser) Close() error {
 	var first error
 	for _, closer := range m.closers {
 		err := closer.Close()
@@ -72,7 +74,7 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 
 	reader, err := bucket.NewReader(ctx, key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("simplecloud: open %q for reading: %w", key, err)
 	}
 
 	var decoder io.ReadCloser
@@ -80,7 +82,7 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 		xzReader, err := xzReader.NewReader(reader, 0)
 		if err != nil {
 			reader.Close()
-			return nil, err
+			return nil, fmt.Errorf("simplecloud: init xz decoder for %q: %w", key, err)
 		}
 		decoder = io.NopCloser(xzReader)
 	} else if strings.HasSuffix(key, ".bz2") {
@@ -90,7 +92,7 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 		gzipReader, err := gzip.NewReader(reader)
 		if err != nil {
 			reader.Close()
-			return nil, err
+			return nil, fmt.Errorf("simplecloud: init gzip decoder for %q: %w", key, err)
 		}
 		decoder = gzipReader
 	}
@@ -99,7 +101,7 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 		return reader, nil
 	}
 
-	return &MultiCloser{
+	return &multiCloser{
 		Reader:  decoder,
 		closers: []io.Closer{decoder, reader},
 	}, nil
@@ -120,7 +122,7 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 
 	writer, err := bucket.NewWriter(ctx, key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("simplecloud: open %q for writing: %w", key, err)
 	}
 
 	var encoder io.WriteCloser
@@ -128,14 +130,14 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 		xzWriter, err := xz.NewWriter(writer)
 		if err != nil {
 			writer.Close()
-			return nil, err
+			return nil, fmt.Errorf("simplecloud: init xz encoder for %q: %w", key, err)
 		}
 		encoder = xzWriter
 	} else if strings.HasSuffix(key, ".bz2") {
 		bz2Writer, err := bzip2Writer.NewWriter(writer, nil)
 		if err != nil {
 			writer.Close()
-			return nil, err
+			return nil, fmt.Errorf("simplecloud: init bzip2 encoder for %q: %w", key, err)
 		}
 		encoder = bz2Writer
 	} else if strings.HasSuffix(key, ".gz") {
@@ -147,7 +149,7 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 		return writer, nil
 	}
 
-	return &MultiCloser{
+	return &multiCloser{
 		Writer:  encoder,
 		closers: []io.Closer{encoder, writer},
 	}, nil
@@ -176,8 +178,11 @@ func Copy(ctx context.Context, src Reader, dst Writer, srcPath, dstPath string) 
 
 	n, err := io.Copy(w, r)
 	closeErr := w.Close()
-	if closeErr != nil && err == nil {
+	if err == nil {
 		err = closeErr
 	}
-	return n, err
+	if err != nil {
+		return n, fmt.Errorf("simplecloud: copy %q to %q: %w", srcPath, dstPath, err)
+	}
+	return n, nil
 }
