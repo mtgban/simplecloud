@@ -39,6 +39,141 @@ func readAll(t *testing.T, r io.ReadCloser) string {
 	return string(b)
 }
 
+// ---- Open -------------------------------------------------------------------
+
+func TestOpen_LocalFileWithCompression(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.json.gz")
+	const want = `{"hello":"world"}`
+
+	w, err := simplecloud.InitWriter(ctx, &simplecloud.FileBucket{}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(w, want)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// No scheme -> local filesystem, and the .gz is decompressed transparently.
+	r, err := simplecloud.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got := readAll(t, r); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestOpen_LocalPathWithPercent(t *testing.T) {
+	// Open must not run the path through url.Parse: a '%' is a hard parse error
+	// there but a legal filename byte here.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "50%off.txt")
+	const want = "no url.Parse please"
+	writeFile(t, path, want)
+
+	r, err := simplecloud.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got := readAll(t, r); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestOpen_HTTP(t *testing.T) {
+	const want = "served over http"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/dir/file.txt" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		io.WriteString(w, want)
+	}))
+	defer srv.Close()
+
+	r, err := simplecloud.Open(ctx, srv.URL+"/dir/file.txt")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got := readAll(t, r); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestOpen_UnsupportedScheme(t *testing.T) {
+	_, err := simplecloud.Open(ctx, "ftp://host/object.json")
+	if err == nil {
+		t.Fatal("expected error for unsupported scheme, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported scheme") {
+		t.Fatalf("error should mention unsupported scheme, got %q", err.Error())
+	}
+}
+
+// stringBucket is a trivial Reader that serves fixed content, used to exercise
+// the resolver extension point without a live cloud backend.
+type stringBucket struct {
+	gotKey  string
+	content string
+}
+
+func (b *stringBucket) NewReader(_ context.Context, path string) (io.ReadCloser, error) {
+	b.gotKey = path
+	return io.NopCloser(strings.NewReader(b.content)), nil
+}
+
+func TestOpen_ResolverHandlesCustomScheme(t *testing.T) {
+	fake := &stringBucket{content: "from resolver"}
+	var gotScheme, gotHost string
+	resolver := func(_ context.Context, scheme, host string) (simplecloud.Reader, error) {
+		gotScheme, gotHost = scheme, host
+		if scheme == "mem" {
+			return fake, nil
+		}
+		return nil, nil
+	}
+
+	// The '#' in the key also guards that Open takes only scheme/host from
+	// url.Parse (which would treat '#v2' as a fragment) while the original path
+	// still reaches the backend intact.
+	r, err := simplecloud.Open(ctx, "mem://my-bucket/dir/obj#v2.txt", simplecloud.WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got := readAll(t, r); got != "from resolver" {
+		t.Fatalf("got %q, want %q", got, "from resolver")
+	}
+	if gotScheme != "mem" || gotHost != "my-bucket" {
+		t.Fatalf("resolver saw scheme=%q host=%q, want mem/my-bucket", gotScheme, gotHost)
+	}
+	if fake.gotKey != "/dir/obj#v2.txt" {
+		t.Fatalf("bucket saw key %q, want /dir/obj#v2.txt", fake.gotKey)
+	}
+}
+
+func TestOpen_ResolverFallsThroughToBuiltin(t *testing.T) {
+	// A resolver that declines (nil, nil) must let the built-in schemes handle
+	// the path.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "local.txt")
+	const want = "built-in wins"
+	writeFile(t, path, want)
+
+	resolver := func(_ context.Context, scheme, host string) (simplecloud.Reader, error) {
+		return nil, nil // decline everything
+	}
+
+	r, err := simplecloud.Open(ctx, path, simplecloud.WithResolver(resolver))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got := readAll(t, r); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 // ---- FileBucket -------------------------------------------------------------
 
 func TestFileBucket_ReadWrite(t *testing.T) {

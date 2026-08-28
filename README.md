@@ -124,6 +124,61 @@ if err != nil {
 fmt.Printf("copied %d bytes\n", n)
 ```
 
+## Opening by URL
+
+`Open` picks a backend from the path's scheme so callers don't have to
+construct one, applying transparent decompression via `InitReader`:
+
+| Scheme | Backend |
+|--------|---------|
+| (none) | Local filesystem |
+| `http`, `https` | HTTP(S) |
+| `b2` | Backblaze B2 (host is the bucket name) |
+| `s3` | Amazon S3 / S3-compatible (host is the bucket name) |
+| `gs` | Google Cloud Storage (host is the bucket name) |
+
+Backend-specific configuration — credentials, the HTTP client, endpoints,
+concurrency — is passed with functional options, so the package never sources
+credentials on its own:
+
+```go
+r, err := simplecloud.Open(ctx, "b2://my-bucket/data/report.json.xz",
+    simplecloud.WithB2Credentials(keyID, appKey),
+    simplecloud.WithConcurrentDownloads(8),
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer r.Close()
+// r yields decompressed data
+
+// S3-compatible (e.g. Cloudflare R2):
+r, err = simplecloud.Open(ctx, "s3://my-bucket/data/report.json.gz",
+    simplecloud.WithS3Credentials(accessKey, secretKey),
+    simplecloud.WithS3Endpoint("https://<account>.r2.cloudflarestorage.com"),
+)
+
+// A local path needs no options and no scheme:
+r, err = simplecloud.Open(ctx, "/data/report.json.gz")
+```
+
+For any other scheme — or to control client lifecycle instead of the per-call
+client the `s3` and `gs` schemes create — supply a resolver. It is consulted
+before the built-in schemes (so it can also override them); returning
+`(nil, nil)` falls through:
+
+```go
+gcs, _ := simplecloud.NewGCSClient(ctx, "sa.json", "my-bucket") // closed by you
+r, err := simplecloud.Open(ctx, "gs://my-bucket/data/report.json.gz",
+    simplecloud.WithResolver(func(_ context.Context, scheme, host string) (simplecloud.Reader, error) {
+        if scheme == "gs" {
+            return gcs, nil
+        }
+        return nil, nil
+    }),
+)
+```
+
 ## Limitations
 
 This is a lightweight helper, and some operations are not covered:
