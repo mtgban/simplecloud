@@ -48,6 +48,21 @@ type multiCloser struct {
 	closers []io.Closer
 }
 
+// Abort discards the in-progress write rather than committing it. The
+// compression layer is deliberately not closed — flushing it would only finish
+// framing a partial object — and the underlying storage stream, which is always
+// last, is aborted instead.
+func (m *multiCloser) Abort() error {
+	if len(m.closers) == 0 {
+		return nil
+	}
+	last := m.closers[len(m.closers)-1]
+	if w, ok := last.(io.WriteCloser); ok {
+		return abortWrite(w)
+	}
+	return last.Close()
+}
+
 // Close closes every wrapped Closer in order and returns the first error.
 func (m *multiCloser) Close() error {
 	var first error
@@ -164,6 +179,11 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 // The returned count is the number of uncompressed bytes transferred between
 // the reader and writer, not the number of bytes read from or written to
 // storage.
+//
+// If the transfer fails partway, the destination is aborted rather than closed,
+// so no truncated object is published — Close is what commits on the cloud
+// backends. Destinations that do not implement Aborter are closed instead, and
+// so will retain whatever was written.
 func Copy(ctx context.Context, src Reader, dst Writer, srcPath, dstPath string) (int64, error) {
 	r, err := InitReader(ctx, src, srcPath)
 	if err != nil {
@@ -177,11 +197,14 @@ func Copy(ctx context.Context, src Reader, dst Writer, srcPath, dstPath string) 
 	}
 
 	n, err := io.Copy(w, r)
-	closeErr := w.Close()
-	if err == nil {
-		err = closeErr
-	}
 	if err != nil {
+		// Closing here would commit a truncated object on the cloud backends,
+		// since Close is what publishes. Discard the partial write instead.
+		abortWrite(w)
+		return n, fmt.Errorf("simplecloud: copy %q to %q: %w", srcPath, dstPath, err)
+	}
+
+	if err := w.Close(); err != nil {
 		return n, fmt.Errorf("simplecloud: copy %q to %q: %w", srcPath, dstPath, err)
 	}
 	return n, nil

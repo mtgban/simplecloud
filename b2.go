@@ -49,9 +49,12 @@ func (b *B2Bucket) NewReader(ctx context.Context, path string) (io.ReadCloser, e
 
 // NewWriter opens the object at path in the bucket for writing. A leading slash
 // is stripped (see NewReader). The caller must call Close when done; Close
-// finalises the upload to B2.
+// finalises the upload to B2. The returned writer implements Aborter: aborting
+// cancels the write's context, which makes blazer discard any partial large-file
+// upload instead of finalising it.
 func (b *B2Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, error) {
 	dst := strings.TrimLeft(path, "/")
+	ctx, cancel := context.WithCancel(ctx)
 	obj := b.Bucket.Object(dst).NewWriter(ctx)
-	return obj, nil
+	return &cancelWriter{WriteCloser: obj, cancel: cancel}, nil
 }

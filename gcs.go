@@ -50,9 +50,12 @@ func (g *GCSBucket) NewReader(ctx context.Context, path string) (io.ReadCloser, 
 
 // NewWriter opens the object at path in the bucket for writing. A leading slash
 // is stripped (see NewReader). The caller must call Close when done; Close is
-// what commits the object to GCS.
+// what commits the object to GCS. The returned writer implements Aborter:
+// aborting cancels the write's context, which is how the GCS client is told to
+// discard a partial object instead of committing it.
 func (g *GCSBucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, error) {
 	key := strings.TrimLeft(path, "/")
+	ctx, cancel := context.WithCancel(ctx)
 	obj := g.Bucket.Object(key).NewWriter(ctx)
-	return obj, nil
+	return &cancelWriter{WriteCloser: obj, cancel: cancel}, nil
 }

@@ -124,6 +124,14 @@ if err != nil {
 fmt.Printf("copied %d bytes\n", n)
 ```
 
+If the transfer fails partway, `Copy` aborts the destination instead of closing
+it. This matters because `Close()` is what commits an object on every cloud
+backend — closing a failed transfer would publish a truncated object that later
+readers cannot distinguish from a good one. The `FileBucket`, `B2Bucket`,
+`GCSBucket`, and `S3Bucket` writers all support this via the `Aborter`
+interface; a custom destination that doesn't implement it is closed instead, and
+retains whatever was written.
+
 ## Opening by URL
 
 `Open` picks a backend from the path's scheme so callers don't have to

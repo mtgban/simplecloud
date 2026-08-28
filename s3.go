@@ -2,6 +2,7 @@ package simplecloud
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 
@@ -96,6 +97,22 @@ func (w *s3PipeWriter) Close() error {
 	}
 	w.cancel()
 	return err
+}
+
+// errUploadAborted fails the uploader's read so that Upload returns an error
+// instead of completing the object from a truncated stream.
+var errUploadAborted = errors.New("simplecloud: upload aborted")
+
+// Abort discards the upload instead of committing it. Closing the pipe normally
+// would signal a clean EOF, which makes the uploader complete a partial object;
+// failing the read makes it abort instead.
+func (w *s3PipeWriter) Abort() error {
+	w.pw.CloseWithError(errUploadAborted)
+	if _, ok := <-w.done; ok {
+		close(w.done)
+	}
+	w.cancel()
+	return nil
 }
 
 // NewWriter opens the object at path in the bucket for writing using a

@@ -467,6 +467,126 @@ func TestInitReader_PresignedURL(t *testing.T) {
 	}
 }
 
+// ---- Copy abort -------------------------------------------------------------
+
+// commitBucket mimics cloud semantics, where Close is what publishes an object
+// and Abort discards it.
+type commitBucket struct {
+	committed string
+	aborted   bool
+}
+
+func (b *commitBucket) NewWriter(_ context.Context, _ string) (io.WriteCloser, error) {
+	return &commitWriter{b: b}, nil
+}
+
+type commitWriter struct {
+	b   *commitBucket
+	buf []byte
+}
+
+func (w *commitWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	return len(p), nil
+}
+
+func (w *commitWriter) Close() error {
+	w.b.committed = string(w.buf)
+	return nil
+}
+
+func (w *commitWriter) Abort() error {
+	w.b.aborted = true
+	return nil
+}
+
+// failingBucket serves a reader that fails partway through the stream.
+type failingBucket struct{}
+
+func (failingBucket) NewReader(_ context.Context, _ string) (io.ReadCloser, error) {
+	return io.NopCloser(io.MultiReader(
+		strings.NewReader("GOOD-DATA-"),
+		errReader{},
+	)), nil
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("network died mid-stream") }
+
+func TestCopy_AbortsInsteadOfCommittingOnError(t *testing.T) {
+	// A mid-transfer read failure must not publish a truncated object: Close
+	// is what commits on the cloud backends, so Copy must Abort instead.
+	dst := &commitBucket{}
+	_, err := simplecloud.Copy(ctx, failingBucket{}, dst, "src.txt", "dst.txt")
+	if err == nil {
+		t.Fatal("expected error from failing source, got nil")
+	}
+	if !dst.aborted {
+		t.Error("destination writer was not aborted")
+	}
+	if dst.committed != "" {
+		t.Errorf("truncated object was committed: %q", dst.committed)
+	}
+}
+
+func TestCopy_AbortWithCompression(t *testing.T) {
+	// With a compressed destination the abort must reach the underlying storage
+	// stream through the compression layer, rather than flushing the encoder
+	// and committing a partial object.
+	dst := &commitBucket{}
+	_, err := simplecloud.Copy(ctx, failingBucket{}, dst, "src.txt", "dst.txt.gz")
+	if err == nil {
+		t.Fatal("expected error from failing source, got nil")
+	}
+	if !dst.aborted {
+		t.Error("storage writer was not aborted through the compression layer")
+	}
+	if dst.committed != "" {
+		t.Errorf("truncated compressed object was committed: %q", dst.committed)
+	}
+}
+
+func TestCopy_AbortRemovesPartialLocalFile(t *testing.T) {
+	// A failed transfer to the local filesystem must not leave a truncated file
+	// behind: NewWriter already truncated any previous contents, so a partial
+	// file would read as valid data.
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "out.txt")
+
+	_, err := simplecloud.Copy(ctx, failingBucket{}, &simplecloud.FileBucket{}, "src.txt", dst)
+	if err == nil {
+		t.Fatal("expected error from failing source, got nil")
+	}
+	if _, statErr := os.Stat(dst); !errors.Is(statErr, os.ErrNotExist) {
+		got, _ := os.ReadFile(dst)
+		t.Fatalf("partial file left behind with contents %q", got)
+	}
+}
+
+func TestCopy_CommitsOnSuccess(t *testing.T) {
+	// The abort path must not disturb the success path.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	const want = "complete payload"
+	writeFile(t, src, want)
+
+	dst := &commitBucket{}
+	n, err := simplecloud.Copy(ctx, &simplecloud.FileBucket{}, dst, src, "dst.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != int64(len(want)) {
+		t.Errorf("copied %d bytes, want %d", n, len(want))
+	}
+	if dst.aborted {
+		t.Error("writer was aborted on a successful copy")
+	}
+	if dst.committed != want {
+		t.Errorf("committed %q, want %q", dst.committed, want)
+	}
+}
+
 // ---- Copy -------------------------------------------------------------------
 
 func TestCopy_SameFormat(t *testing.T) {
