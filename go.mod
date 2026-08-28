@@ -6,6 +6,12 @@ go 1.25.0
 // object key, because cleanPath only stripped the scheme for http(s) URLs.
 retract v0.0.10
 
+// v0.0.12 aborted a failed B2 upload without calling b2_cancel_large_file, so
+// a transfer that failed past the 100MB chunk threshold left an unfinished
+// large file whose uploaded parts keep incurring storage charges. The leak is
+// invisible in a normal object listing.
+retract v0.0.12
+
 require (
 	cloud.google.com/go/storage v1.66.0
 	github.com/Backblaze/blazer v0.7.2
