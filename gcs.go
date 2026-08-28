@@ -53,6 +53,10 @@ func (g *GCSBucket) NewReader(ctx context.Context, path string) (io.ReadCloser, 
 // what commits the object to GCS. The returned writer implements Aborter:
 // aborting cancels the write's context, which is how the GCS client is told to
 // discard a partial object instead of committing it.
+//
+// Unlike S3 and B2, an abandoned GCS upload needs no server-side cleanup: only
+// a completed resumable upload appears in the bucket, so partial data is never
+// stored or billed, and the session expires on its own after a week.
 func (g *GCSBucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, error) {
 	key := strings.TrimLeft(path, "/")
 	ctx, cancel := context.WithCancel(ctx)

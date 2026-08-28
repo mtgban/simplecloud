@@ -106,6 +106,13 @@ var errUploadAborted = errors.New("simplecloud: upload aborted")
 // Abort discards the upload instead of committing it. Closing the pipe normally
 // would signal a clean EOF, which makes the uploader complete a partial object;
 // failing the read makes it abort instead.
+//
+// The order here is load-bearing. Failing the read makes manager.Uploader call
+// AbortMultipartUpload (it defaults to LeavePartsOnError=false), and it issues
+// that request on the same context passed to Upload. Waiting for done before
+// cancelling means the abort has already been sent; cancelling first would kill
+// the abort request too, stranding the uploaded parts, which continue to incur
+// storage charges until removed.
 func (w *s3PipeWriter) Abort() error {
 	w.pw.CloseWithError(errUploadAborted)
 	if _, ok := <-w.done; ok {
