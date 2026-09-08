@@ -22,13 +22,17 @@ type GCSBucket struct {
 // Cloud Run, and locally via `gcloud auth application-default login`. The
 // underlying storage.Client is not exposed; callers that need to close it
 // should construct one directly.
+//
+// The file is declared to hold a service account rather than passed as an
+// untyped credentials file, which is the non-deprecated form of the option:
+// the untyped variant accepts any credential type, including externally
+// sourced ones that name an executable to run. Note that the storage client
+// resolves credentials through a path that does not currently act on the
+// declared type, so this states the expectation rather than enforcing it.
 func NewGCSClient(ctx context.Context, serviceAccountFile, bucketName string) (*GCSBucket, error) {
 	var opts []option.ClientOption
 	if serviceAccountFile != "" {
-		//lint:ignore SA1019 Taking a service-account file path is this
-		// constructor's published signature; moving off it is an API change
-		// for callers, not a local substitution.
-		opts = append(opts, option.WithCredentialsFile(serviceAccountFile))
+		opts = append(opts, option.WithAuthCredentialsFile(option.ServiceAccount, serviceAccountFile))
 	}
 
 	client, err := storage.NewClient(ctx, opts...)
