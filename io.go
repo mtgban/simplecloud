@@ -4,6 +4,7 @@ import (
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -200,7 +201,10 @@ func Copy(ctx context.Context, src Reader, dst Writer, srcPath, dstPath string) 
 	if err != nil {
 		// Closing here would commit a truncated object on the cloud backends,
 		// since Close is what publishes. Discard the partial write instead.
-		abortWrite(w)
+		// A failed abort is reported alongside the transfer error rather than
+		// dropped: it can leave an unfinished multipart upload behind whose
+		// parts keep incurring storage charges.
+		err = errors.Join(err, abortWrite(w))
 		return n, fmt.Errorf("simplecloud: copy %q to %q: %w", srcPath, dstPath, err)
 	}
 

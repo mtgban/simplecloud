@@ -9,6 +9,42 @@ permissions:
   contents: read
 
 jobs:
+  # Formatting, vet and lint read nothing the tests need and are independent
+  # of the Go version under test, so they run once on their own rather than
+  # repeating across the matrix below.
+  style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -s -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Lint
+        run: |
+          go run github.com/mgechev/revive@v1.13.0 \
+            -set_exit_status -config .revive.toml ./...
+
+      # revive reads the syntax tree; staticcheck follows the values through
+      # it. Pinned, since a new release finding new things would fail a build
+      # that changed nothing.
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -21,18 +57,6 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
           check-latest: true
-
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "These files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: go vet
-        run: go vet ./...
 
       - name: test
         run: go test -race ./...

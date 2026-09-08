@@ -16,7 +16,11 @@ import (
 // S3Bucket implements Reader and Writer for an Amazon S3 bucket (or any
 // S3-compatible object store).
 type S3Bucket struct {
-	client   *s3.Client
+	client *s3.Client
+	//lint:ignore SA1019 feature/s3/transfermanager supersedes manager.Uploader,
+	// but Abort depends on this uploader calling AbortMultipartUpload on the
+	// Upload context when a read fails (LeavePartsOnError defaults false).
+	// Migrating means re-verifying that abort against a live bucket first.
 	uploader *manager.Uploader
 	// Bucket is the name of the target S3 bucket.
 	Bucket string
@@ -52,6 +56,7 @@ func NewS3Client(ctx context.Context, accessKey, secretKey, bucketName, endpoint
 		}
 	})
 
+	//lint:ignore SA1019 see the uploader field on S3Bucket.
 	uploader := manager.NewUploader(client)
 
 	return &S3Bucket{
@@ -137,6 +142,7 @@ func (s *S3Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, 
 	ctx, cancel := context.WithCancel(ctx)
 
 	go func() {
+		//lint:ignore SA1019 see the uploader field on S3Bucket.
 		_, err := s.uploader.Upload(ctx, &s3.PutObjectInput{
 			Bucket: &s.Bucket,
 			Key:    &key,
