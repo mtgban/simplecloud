@@ -41,11 +41,15 @@ warningCode = 1
 # operation around it already failed, where the result cannot change what the
 # caller is told. io.Copy is only exempt where its result is discarded
 # outright; the transfer in Copy assigns both values and still checks them.
+# io.WriteString is the same family as io.Writer.Write, which go-mtgban's own
+# config exempts: it is the tests filling a temp file or an httptest response
+# body, where a short write surfaces as the assertion that follows failing,
+# and where a handler goroutine could not call t.Fatal anyway.
 # Naming these keeps a real unhandled error from being lost among ones that
 # are not; note that Copy's abort is deliberately NOT exempt, since a failed
 # abort can strand a multipart upload.
 [rule.unhandled-error]
-  arguments = ["io.PipeWriter.Close", "io.PipeWriter.CloseWithError", "io.PipeReader.CloseWithError", "io.Closer.Close", "os.File.Close", "io.Copy"]
+  arguments = ["io.PipeWriter.Close", "io.PipeWriter.CloseWithError", "io.PipeReader.CloseWithError", "io.Closer.Close", "os.File.Close", "io.Copy", "io.WriteString"]
 [rule.unreachable-code]
 [rule.var-declaration]
 [rule.var-naming]
