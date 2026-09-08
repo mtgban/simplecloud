@@ -145,14 +145,17 @@ func InitWriter(ctx context.Context, bucket Writer, path string) (io.WriteCloser
 	if strings.HasSuffix(key, ".xz") {
 		xzWriter, err := xz.NewWriter(writer)
 		if err != nil {
-			writer.Close()
+			// Close would commit an empty object on the cloud backends, since
+			// Close is what publishes; discard the opened stream instead.
+			err = errors.Join(err, abortWrite(writer))
 			return nil, fmt.Errorf("simplecloud: init xz encoder for %q: %w", key, err)
 		}
 		encoder = xzWriter
 	} else if strings.HasSuffix(key, ".bz2") {
 		bz2Writer, err := bzip2Writer.NewWriter(writer, nil)
 		if err != nil {
-			writer.Close()
+			// See the xz branch: Close would publish an empty object.
+			err = errors.Join(err, abortWrite(writer))
 			return nil, fmt.Errorf("simplecloud: init bzip2 encoder for %q: %w", key, err)
 		}
 		encoder = bz2Writer
