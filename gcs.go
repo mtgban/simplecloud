@@ -25,6 +25,9 @@ type GCSBucket struct {
 func NewGCSClient(ctx context.Context, serviceAccountFile, bucketName string) (*GCSBucket, error) {
 	var opts []option.ClientOption
 	if serviceAccountFile != "" {
+		//lint:ignore SA1019 Taking a service-account file path is this
+		// constructor's published signature; moving off it is an API change
+		// for callers, not a local substitution.
 		opts = append(opts, option.WithCredentialsFile(serviceAccountFile))
 	}
 
