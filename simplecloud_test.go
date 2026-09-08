@@ -474,6 +474,9 @@ func TestInitReader_PresignedURL(t *testing.T) {
 type commitBucket struct {
 	committed string
 	aborted   bool
+	// failWrites makes every Write fail, which is how a compressor is made to
+	// fail to initialise.
+	failWrites bool
 }
 
 func (b *commitBucket) NewWriter(_ context.Context, _ string) (io.WriteCloser, error) {
@@ -486,6 +489,9 @@ type commitWriter struct {
 }
 
 func (w *commitWriter) Write(p []byte) (int, error) {
+	if w.b.failWrites {
+		return 0, errors.New("simulated write failure")
+	}
 	w.buf = append(w.buf, p...)
 	return len(p), nil
 }
@@ -513,6 +519,26 @@ func (failingBucket) NewReader(_ context.Context, _ string) (io.ReadCloser, erro
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("network died mid-stream") }
+
+func TestInitWriter_AbortsWhenCompressorFails(t *testing.T) {
+	// xz.NewWriter writes its stream header immediately, so a destination that
+	// fails on Write makes the compressor fail to initialise. The storage
+	// stream already opened for it must be aborted rather than closed: Close is
+	// what publishes on the cloud backends, so closing would commit an empty
+	// object at the destination.
+	dst := &commitBucket{failWrites: true}
+
+	_, err := simplecloud.InitWriter(ctx, dst, "data.json.xz")
+	if err == nil {
+		t.Fatal("expected error from failing compressor init, got nil")
+	}
+	if !dst.aborted {
+		t.Error("storage writer was not aborted")
+	}
+	if dst.committed != "" {
+		t.Errorf("empty object was committed: %q", dst.committed)
+	}
+}
 
 func TestCopy_AbortsInsteadOfCommittingOnError(t *testing.T) {
 	// A mid-transfer read failure must not publish a truncated object: Close
