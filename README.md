@@ -203,6 +203,17 @@ For advanced use cases, use the underlying SDKs directly:
 - [github.com/Backblaze/blazer/b2](https://pkg.go.dev/github.com/Backblaze/blazer/b2)
 - [github.com/aws/aws-sdk-go-v2](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/welcome.html)
 
+## Further documentation
+
+- [SPECIFICATIONS.md](SPECIFICATIONS.md) — the behaviour contract: path and
+  key handling, compression, abort semantics, error wrapping, and what is
+  explicitly not guaranteed.
+- [AGENTS.md](AGENTS.md) — for anyone changing this repo: the required
+  checks, and the invariants that must not be broken (several exist because
+  breaking them corrupted production data).
+- [todo/](todo/) — known improvements that are deliberately not done yet,
+  each with its reasoning and blockers.
+
 ## License
 
 MIT
