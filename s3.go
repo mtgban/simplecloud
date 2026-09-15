@@ -102,10 +102,13 @@ func (s *S3Bucket) List(ctx context.Context, prefix string) iter.Seq2[ObjectInfo
 				return
 			}
 			for _, obj := range page.Contents {
-				// Every field on types.Object is a pointer; a key is the only
-				// one worth refusing to guess at.
+				// Every field on types.Object is a pointer. A missing key means
+				// a response this code cannot interpret, so it is surfaced
+				// rather than silently skipped — dropping an entry would
+				// under-report a listing with no sign anything went wrong.
 				if obj.Key == nil {
-					continue
+					yield(ObjectInfo{}, fmt.Errorf("simplecloud: list %q: response contained an object with no key", p))
+					return
 				}
 				info := ObjectInfo{Key: *obj.Key}
 				if obj.Size != nil {

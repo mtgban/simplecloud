@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -111,9 +112,24 @@ func TestList_ErrorIsYieldedAndEndsIteration(t *testing.T) {
 	}
 }
 
+// Lister is optional, and the documented contract is that the filesystem and
+// HTTP backends do not implement it. Go cannot assert the negative at compile
+// time, so it is pinned here: accidentally adding List to either would change
+// the documented API surface silently.
+func TestList_FileAndHTTPDoNotImplementLister(t *testing.T) {
+	if _, ok := any(&simplecloud.FileBucket{}).(simplecloud.Lister); ok {
+		t.Error("FileBucket implements Lister; SPECIFICATIONS §10 says it does not")
+	}
+	if _, ok := any(&simplecloud.HTTPBucket{}).(simplecloud.Lister); ok {
+		t.Error("HTTPBucket implements Lister; HTTP has no listing operation")
+	}
+}
+
 // TestList_LiveB2 exercises the real B2 implementation. It is skipped unless
 // credentials are present, so CI does not depend on it — but mocks have been
-// insufficient in this package before, so the path exists to be run by hand.
+// insufficient in this package before, and the offline tests above only prove
+// a fake, so every property claimed for the live backend is pinned here rather
+// than measured by hand once.
 //
 //	B2_APPLICATION_KEY_ID_DATASTORE=... B2_APPLICATION_KEY_DATASTORE=... \
 //	  SIMPLECLOUD_TEST_B2_BUCKET=my-bucket go test -run TestList_LiveB2 -v
@@ -125,31 +141,118 @@ func TestList_LiveB2(t *testing.T) {
 		t.Skip("B2 credentials or bucket not set")
 	}
 
-	b, err := simplecloud.NewB2Client(context.Background(), id, key, bucket)
+	ctx := context.Background()
+	b, err := simplecloud.NewB2Client(ctx, id, key, bucket)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	n := 0
-	for obj, err := range b.List(context.Background(), "") {
-		if err != nil {
-			t.Fatal(err)
+	// collect gathers up to limit keys under prefix, failing on any error.
+	collect := func(t *testing.T, prefix string, limit int) []simplecloud.ObjectInfo {
+		t.Helper()
+		var got []simplecloud.ObjectInfo
+		for obj, err := range b.List(ctx, prefix) {
+			if err != nil {
+				t.Fatalf("List(%q): %v", prefix, err)
+			}
+			got = append(got, obj)
+			if len(got) >= limit {
+				break
+			}
 		}
-		if obj.Key == "" {
-			t.Error("empty key in listing")
+		return got
+	}
+
+	sample := collect(t, "", 25)
+	if len(sample) == 0 {
+		t.Skip("bucket is empty; nothing to assert")
+	}
+	t.Logf("listed %d objects from %q", len(sample), bucket)
+
+	t.Run("fields are populated", func(t *testing.T) {
+		for _, obj := range sample {
+			if obj.Key == "" {
+				t.Error("empty key in listing")
+			}
+			if obj.LastModified.IsZero() {
+				t.Errorf("zero LastModified for %q; the UploadTimestamp fallback should prevent this", obj.Key)
+			}
+			if obj.LastModified.After(time.Now().Add(time.Hour)) {
+				t.Errorf("LastModified in the future for %q: %s", obj.Key, obj.LastModified)
+			}
 		}
-		if obj.LastModified.IsZero() {
-			t.Errorf("zero LastModified for %q; the UploadTimestamp fallback should prevent this", obj.Key)
-		}
-		if obj.LastModified.After(time.Now().Add(time.Hour)) {
-			t.Errorf("LastModified in the future for %q: %s", obj.Key, obj.LastModified)
-		}
-		if n++; n >= 25 {
+	})
+
+	// Derive a prefix that actually exists rather than hard-coding one, so the
+	// test runs against any bucket.
+	prefix := ""
+	for _, obj := range sample {
+		if i := strings.IndexByte(obj.Key, '/'); i >= 0 {
+			prefix = obj.Key[:i+1]
 			break
 		}
 	}
-	if n == 0 {
-		t.Skip("bucket is empty; nothing to assert")
+	if prefix == "" && len(sample[0].Key) > 1 {
+		prefix = sample[0].Key[:1]
 	}
-	t.Logf("listed %d objects from %q", n, bucket)
+
+	t.Run("prefix filters", func(t *testing.T) {
+		if prefix == "" {
+			t.Skip("no usable prefix in this bucket")
+		}
+		got := collect(t, prefix, 100)
+		if len(got) == 0 {
+			t.Fatalf("prefix %q returned nothing, but was taken from a listed key", prefix)
+		}
+		for _, obj := range got {
+			if !strings.HasPrefix(obj.Key, prefix) {
+				t.Errorf("key %q returned for prefix %q", obj.Key, prefix)
+			}
+		}
+	})
+
+	t.Run("leading slash in prefix is equivalent", func(t *testing.T) {
+		if prefix == "" {
+			t.Skip("no usable prefix in this bucket")
+		}
+		bare := collect(t, prefix, 100)
+		slashed := collect(t, "/"+prefix, 100)
+
+		if len(bare) != len(slashed) {
+			t.Fatalf("%q returned %d objects, %q returned %d", prefix, len(bare), "/"+prefix, len(slashed))
+		}
+		for i := range bare {
+			if bare[i].Key != slashed[i].Key {
+				t.Errorf("index %d: %q vs %q", i, bare[i].Key, slashed[i].Key)
+			}
+		}
+	})
+
+	t.Run("non-matching prefix is empty and not an error", func(t *testing.T) {
+		missing := "simplecloud-no-such-prefix-" + strconv.FormatInt(time.Now().UnixNano(), 36) + "/"
+		n := 0
+		for _, err := range b.List(ctx, missing) {
+			if err != nil {
+				t.Fatalf("List(%q) errored on a prefix matching nothing: %v", missing, err)
+			}
+			n++
+		}
+		if n != 0 {
+			t.Errorf("prefix %q returned %d objects, want 0", missing, n)
+		}
+	})
+
+	t.Run("break stops iteration cleanly", func(t *testing.T) {
+		n := 0
+		for _, err := range b.List(ctx, "") {
+			if err != nil {
+				t.Fatal(err)
+			}
+			n++
+			break
+		}
+		if n != 1 {
+			t.Fatalf("iterator produced %d objects after break, want 1", n)
+		}
+	})
 }
