@@ -329,14 +329,30 @@ across backends.
 
 ### 10.3 Verification status
 
-The iterator contract — prefix filtering, leading-slash normalisation, early
-termination, and error propagation — is covered by offline tests.
+The offline tests cover the iterator contract — prefix filtering,
+leading-slash normalisation, early termination, and error-as-final-pair —
+but they exercise a **fake** `Lister`, so they pin what a caller may rely on,
+not what any backend actually does.
 
-The **B2** implementation is additionally verified against a live bucket:
-prefix filtering, a leading-slash prefix resolving identically, a
-non-matching prefix returning nothing without error, clean early break, and
-no zero `LastModified` across 25 objects. `TestList_LiveB2` in the repo runs
-that check and skips unless credentials are set.
+The **B2** implementation is additionally verified against a live bucket by
+`TestList_LiveB2`, which skips unless credentials are set. It asserts, as
+separate subtests rather than as a one-off manual measurement:
+
+- every listed object has a non-empty key, a non-zero `LastModified` (so the
+  `UploadTimestamp` fallback is exercised, not assumed), and no timestamp in
+  the future;
+- a prefix *derived from the bucket's own contents* returns only keys
+  carrying it, and returns at least one;
+- the same prefix with a leading slash returns an identical key sequence;
+- a prefix matching nothing yields no objects and no error;
+- breaking out of the loop stops after exactly one object.
+
+Run it with:
+
+```sh
+B2_APPLICATION_KEY_ID_DATASTORE=... B2_APPLICATION_KEY_DATASTORE=... \
+  SIMPLECLOUD_TEST_B2_BUCKET=my-bucket go test -run TestList_LiveB2 -v
+```
 
 The **S3** and **GCS** implementations are verified by construction and the
 compile-time assertions only; no credentials were available. Their
