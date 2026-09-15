@@ -11,6 +11,8 @@ package simplecloud
 import (
 	"context"
 	"io"
+	"iter"
+	"time"
 )
 
 // Reader is implemented by any storage backend that supports object reads.
@@ -32,6 +34,59 @@ type ReadWriter interface {
 	Reader
 	Writer
 }
+
+// ObjectInfo describes a single object returned by a List.
+type ObjectInfo struct {
+	// Key is the object's full key, not relative to the listed prefix, and
+	// carries no leading slash.
+	Key string
+
+	// Size is the stored size in bytes. For a compressed object this is the
+	// compressed size, not the size InitReader will yield.
+	Size int64
+
+	// LastModified is the object's modification time. The backends do not all
+	// mean the same thing by it: S3 and GCS always report a server-side
+	// timestamp, while B2 only records one when the uploader supplied it and
+	// otherwise falls back to the upload timestamp. Treat it as "roughly when
+	// this object appeared", not as a value to compare across backends.
+	LastModified time.Time
+}
+
+// Lister is implemented by backends that can enumerate objects.
+//
+// It is optional, in the same way as Aborter: the local filesystem and HTTP
+// backends do not implement it. Type-assert to reach it.
+type Lister interface {
+	// List iterates over every object whose key begins with prefix, in
+	// whatever order the backend returns them. A leading slash on prefix is
+	// stripped, and an empty prefix lists the whole bucket.
+	//
+	// Pagination is handled internally; the iterator fetches further pages as
+	// it is consumed, so stopping early stops the requests. On failure the
+	// iterator yields one final pair with a non-nil error and then ends, so a
+	// caller must check the error on every iteration:
+	//
+	//	for obj, err := range bucket.List(ctx, "magic/") {
+	//		if err != nil {
+	//			return err
+	//		}
+	//		...
+	//	}
+	//
+	// Listing is flat: there is no delimiter, so keys containing "/" are
+	// returned in full rather than collapsed into common prefixes.
+	List(ctx context.Context, prefix string) iter.Seq2[ObjectInfo, error]
+}
+
+// The cloud backends implement Lister; the filesystem and HTTP backends do
+// not. Asserted here so a signature drift fails the build rather than silently
+// dropping a backend out of the interface.
+var (
+	_ Lister = (*S3Bucket)(nil)
+	_ Lister = (*GCSBucket)(nil)
+	_ Lister = (*B2Bucket)(nil)
+)
 
 // Aborter is implemented by writers that can discard an in-progress write
 // instead of committing it.

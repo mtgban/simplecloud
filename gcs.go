@@ -2,10 +2,14 @@ package simplecloud
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"iter"
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -69,4 +73,31 @@ func (g *GCSBucket) NewWriter(ctx context.Context, path string) (io.WriteCloser,
 	ctx, cancel := context.WithCancel(ctx)
 	obj := g.Bucket.Object(key).NewWriter(ctx)
 	return &cancelWriter{WriteCloser: obj, cancel: cancel}, nil
+}
+
+// List iterates over objects in the bucket whose key begins with prefix. The
+// underlying iterator pages lazily, so abandoning it stops the requests.
+func (g *GCSBucket) List(ctx context.Context, prefix string) iter.Seq2[ObjectInfo, error] {
+	return func(yield func(ObjectInfo, error) bool) {
+		p := strings.TrimLeft(prefix, "/")
+		it := g.Bucket.Objects(ctx, &storage.Query{Prefix: p})
+		for {
+			attrs, err := it.Next()
+			if errors.Is(err, iterator.Done) {
+				return
+			}
+			if err != nil {
+				yield(ObjectInfo{}, fmt.Errorf("simplecloud: list %q: %w", p, err))
+				return
+			}
+			ok := yield(ObjectInfo{
+				Key:          attrs.Name,
+				Size:         attrs.Size,
+				LastModified: attrs.Updated,
+			}, nil)
+			if !ok {
+				return
+			}
+		}
+	}
 }

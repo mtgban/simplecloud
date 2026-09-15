@@ -20,5 +20,5 @@ Ordered roughly by value, not by number.
 | [007](007-s3-config-struct.md) | Replace `NewS3Client`'s six string params | Breaking; needs a decision |
 | [009](009-revive-test-file-gap.md) | Lint gate misses test files locally | Open question |
 | [010](010-open-client-lifecycle.md) | `Open` never closes S3/GCS clients | Documented; needs a real fix |
-| [011](011-list-and-delete.md) | No `List` or `Delete` | Out of scope by design |
+| [011](011-list-and-delete.md) | No `Delete` (`List` now implemented) | Partly resolved |
 | [012](012-multicloser-embedding.md) | `multiCloser` embeds both directions | Cosmetic |

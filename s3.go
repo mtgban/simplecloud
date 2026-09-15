@@ -3,7 +3,9 @@ package simplecloud
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"iter"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -81,6 +83,43 @@ func (s *S3Bucket) NewReader(ctx context.Context, path string) (io.ReadCloser, e
 	}
 
 	return resp.Body, nil
+}
+
+// List iterates over objects in the bucket whose key begins with prefix. The
+// paginator is advanced lazily, so abandoning the iterator stops the requests.
+func (s *S3Bucket) List(ctx context.Context, prefix string) iter.Seq2[ObjectInfo, error] {
+	return func(yield func(ObjectInfo, error) bool) {
+		p := strings.TrimLeft(prefix, "/")
+		paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+			Bucket: &s.Bucket,
+			Prefix: &p,
+		})
+
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				yield(ObjectInfo{}, fmt.Errorf("simplecloud: list %q: %w", p, err))
+				return
+			}
+			for _, obj := range page.Contents {
+				// Every field on types.Object is a pointer; a key is the only
+				// one worth refusing to guess at.
+				if obj.Key == nil {
+					continue
+				}
+				info := ObjectInfo{Key: *obj.Key}
+				if obj.Size != nil {
+					info.Size = *obj.Size
+				}
+				if obj.LastModified != nil {
+					info.LastModified = *obj.LastModified
+				}
+				if !yield(info, nil) {
+					return
+				}
+			}
+		}
+	}
 }
 
 type s3PipeWriter struct {
