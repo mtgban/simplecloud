@@ -9,7 +9,10 @@ documentation, it says so.
 One interface over five storage backends for whole-object reads and writes,
 with transparent compression driven by the path extension.
 
-Deliberately **not** provided: listing, deleting, copying server-side, ACL or
+Listing is available on the three cloud backends via the optional `Lister`
+interface (§10).
+
+Deliberately **not** provided: deleting, copying server-side, ACL or
 permission management, metadata or content-type control, multipart tuning,
 retries or backoff, and resumable transfers. Callers needing those use the
 underlying SDKs directly.
@@ -28,10 +31,15 @@ type Writer interface {
 type ReadWriter interface { Reader; Writer }
 
 type Aborter interface { Abort() error }
+
+type Lister interface {
+    List(ctx context.Context, prefix string) iter.Seq2[ObjectInfo, error]
+}
 ```
 
-A backend implements `Reader`, `Writer`, or both. `Aborter` is optional and
-is described in §6.
+A backend implements `Reader`, `Writer`, or both. `Aborter` and `Lister` are
+optional capability interfaces, reached by type assertion; they are described
+in §6 and §10.
 
 ### 2.1 Lifecycle
 
@@ -267,7 +275,76 @@ the corresponding option is left empty.
 - Concurrent use of one writer from multiple goroutines is not supported.
 - Error strings are not stable; match with `errors.Is`, never on text.
 
-## 10. Versioning
+## 10. Listing
+
+`Lister` is optional and implemented by `S3Bucket`, `GCSBucket` and
+`B2Bucket`. `FileBucket` and `HTTPBucket` do **not** implement it — HTTP has
+no listing operation at all. Compile-time assertions in `cloud.go` keep the
+three cloud backends conforming.
+
+```go
+for obj, err := range bucket.List(ctx, "magic/") {
+    if err != nil {
+        return err
+    }
+    fmt.Println(obj.Key, obj.Size, obj.LastModified)
+}
+```
+
+### 10.1 Semantics
+
+- **Flat.** No delimiter is applied, so a key containing `/` is returned in
+  full rather than collapsed into a common prefix. There are no "folders".
+- **Prefix.** A leading slash is stripped, matching key handling elsewhere.
+  An empty prefix lists the whole bucket. A prefix matching nothing yields
+  no objects and no error.
+- **Order** is whatever the backend returns; none is promised.
+- **Pagination** is internal. The iterator fetches further pages as it is
+  consumed, so breaking out of the loop stops the requests.
+- **Errors** are yielded as one final pair whose `ObjectInfo` is the zero
+  value and whose error is non-nil, after which iteration ends. The error
+  must therefore be checked on every iteration, not only after the loop.
+
+### 10.2 `ObjectInfo`
+
+| Field | Meaning |
+|---|---|
+| `Key` | Full object key, not relative to the prefix, no leading slash |
+| `Size` | Stored size in bytes — the **compressed** size for a compressed object, not what `InitReader` will yield |
+| `LastModified` | See below |
+
+`LastModified` does not mean the same thing on every backend, and is
+normalised only as far as it can be:
+
+- **S3** — `LastModified` from `ListObjectsV2`, always server-set.
+- **GCS** — `ObjectAttrs.Updated`, always server-set.
+- **B2** — blazer populates `LastModified` only when the uploader supplied
+  `src_last_modified_millis`; otherwise it is the zero time. Since
+  `UploadTimestamp` is always set, it is substituted, so the field is never
+  zero. This means a B2 value may be an upload time where an S3 value is a
+  modification time.
+
+Treat it as "roughly when this object appeared", and do not compare values
+across backends.
+
+### 10.3 Verification status
+
+The iterator contract — prefix filtering, leading-slash normalisation, early
+termination, and error propagation — is covered by offline tests.
+
+The **B2** implementation is additionally verified against a live bucket:
+prefix filtering, a leading-slash prefix resolving identically, a
+non-matching prefix returning nothing without error, clean early break, and
+no zero `LastModified` across 25 objects. `TestList_LiveB2` in the repo runs
+that check and skips unless credentials are set.
+
+The **S3** and **GCS** implementations are verified by construction and the
+compile-time assertions only; no credentials were available. Their
+paginators are the standard ones (`ListObjectsV2Paginator`,
+`ObjectIterator`), but see `todo/008` — this package has been misled by
+source reading before.
+
+## 11. Versioning
 
 Tags are `v0.0.N`; the API is pre-1.0 and has taken breaking changes
 (`MultiCloser` was unexported in v0.0.13). The Go module proxy is immutable,

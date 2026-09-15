@@ -191,7 +191,7 @@ r, err := simplecloud.Open(ctx, "gs://my-bucket/data/report.json.gz",
 
 This is a lightweight helper, and some operations are not covered:
 
-- No `List` or `Delete` API
+- No `Delete` API
 - No retry logic or exponential backoff
 - No ACL or permission management
 - No multipart upload configuration
@@ -202,6 +202,31 @@ For advanced use cases, use the underlying SDKs directly:
 - [cloud.google.com/go/storage](https://pkg.go.dev/cloud.google.com/go/storage)
 - [github.com/Backblaze/blazer/b2](https://pkg.go.dev/github.com/Backblaze/blazer/b2)
 - [github.com/aws/aws-sdk-go-v2](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/welcome.html)
+
+## Listing
+
+The three cloud backends implement the optional `Lister` interface. Listing
+is flat (no delimiter) and pages internally, so breaking out of the loop
+stops the requests:
+
+```go
+bucket, err := simplecloud.NewB2Client(ctx, keyID, appKey, "my-bucket")
+if err != nil {
+    log.Fatal(err)
+}
+
+for obj, err := range bucket.List(ctx, "magic/") {
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(obj.Key, obj.Size, obj.LastModified)
+}
+```
+
+`FileBucket` and `HTTPBucket` do not implement it — HTTP has no listing
+operation. `Size` is the stored (compressed) size, and `LastModified` means
+slightly different things per backend; see
+[SPECIFICATIONS.md §10](SPECIFICATIONS.md).
 
 ## Further documentation
 

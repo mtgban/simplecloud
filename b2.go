@@ -2,7 +2,9 @@ package simplecloud
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"iter"
 	"strings"
 
 	"github.com/Backblaze/blazer/b2"
@@ -66,4 +68,39 @@ func (b *B2Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, 
 	}
 	obj := b.Bucket.Object(dst).NewWriter(writeCtx, b2.WithCancelOnError(cancelCtx, nil))
 	return &cancelWriter{WriteCloser: obj, cancel: cancel}, nil
+}
+
+// List iterates over objects in the bucket whose key begins with prefix. The
+// blazer iterator pages lazily, so abandoning it stops the requests.
+//
+// Attrs is free here: the objects come back from the listing with their file
+// info already populated, so reading them costs no extra request.
+func (b *B2Bucket) List(ctx context.Context, prefix string) iter.Seq2[ObjectInfo, error] {
+	return func(yield func(ObjectInfo, error) bool) {
+		p := strings.TrimLeft(prefix, "/")
+		it := b.Bucket.List(ctx, b2.ListPrefix(p))
+		for it.Next() {
+			obj := it.Object()
+			attrs, err := obj.Attrs(ctx)
+			if err != nil {
+				yield(ObjectInfo{}, fmt.Errorf("simplecloud: list %q: %w", p, err))
+				return
+			}
+
+			// B2 only records LastModified when the uploader supplied
+			// src_last_modified_millis; UploadTimestamp is always set, so it
+			// stands in rather than reporting a zero time.
+			mtime := attrs.LastModified
+			if mtime.IsZero() {
+				mtime = attrs.UploadTimestamp
+			}
+
+			if !yield(ObjectInfo{Key: attrs.Name, Size: attrs.Size, LastModified: mtime}, nil) {
+				return
+			}
+		}
+		if err := it.Err(); err != nil {
+			yield(ObjectInfo{}, fmt.Errorf("simplecloud: list %q: %w", p, err))
+		}
+	}
 }
