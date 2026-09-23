@@ -136,15 +136,47 @@ passed to `Upload`. `Abort` must fail the pipe read, wait on `done`, and
 only then `cancel()`. Cancelling first kills the abort request too and
 strands the parts. There is a comment saying so at the call site; keep it.
 
-### 7. The two xz libraries are deliberate.
+### 7. The xz reader has no dictionary-size limit.
 
-`io.go` imports `ulikunitz/xz` for writing and `xi2/xz` for reading. This is
-not a redundant dependency. `ulikunitz/xz`'s `lzma/breader.go` turns a legal
-`(0, nil)` read into a fatal `breader.ReadByte: no data`, and blazer's B2
-reader returns exactly that at every 10 MB download-chunk boundary — so
-reads fail once the *compressed* object exceeds ~10 MB. Reported upstream as
-ulikunitz/xz#79. See `todo/004-consolidate-xz-libraries.md` before touching
-it.
+`io.go` uses `ulikunitz/xz` for both reading and writing. It used to read with
+`xi2/xz`, because `ulikunitz`'s `lzma/breader.go` turned a legal `(0, nil)`
+read into a fatal `breader.ReadByte: no data`, and blazer's B2 reader returns
+exactly that at every 10 MB download-chunk boundary. Fixed upstream in
+**v0.5.17** (ulikunitz/xz#79); `xz_test.go` pins it, offline and against a live
+bucket.
+
+What was lost with `xi2` is a memory guard, and there is **no configuration
+that restores it**. `xi2` capped the LZMA2 dictionary at 64 MiB and returned
+`ErrMemlimit`. `ulikunitz` allocates whatever the stream's block header
+declares, up to the format maximum of 4 GiB:
+
+```
+4164-byte .xz declaring dict=1536MiB  ->  1536 MiB allocated
+4164-byte .xz declaring dict=4GiB     ->  4096 MiB allocated
+```
+
+`xz.ReaderConfig{DictCap: N}` does **not** cap this. `lzmafilter.go` treats it
+as a floor, not a ceiling:
+
+```go
+if dc > config.DictCap {   // dc comes from the stream
+    config.DictCap = dc
+}
+```
+
+Both numbers above were measured with `DictCap` set to 1 MiB. So any `.xz` this
+library did not write — most obviously one fetched through `HTTPBucket` — can
+turn a four-kilobyte response into a multi-gigabyte allocation. Do not add a
+`DictCap` and assume it protects anything.
+
+Reported as [ulikunitz/xz#84](https://github.com/ulikunitz/xz/issues/84).
+**v0.6 already fixes the over-allocation** — measured on `v0.6.0-alpha.3`, the
+same 84-byte streams allocate 0.03 MiB whatever they declare, because
+allocation there tracks the data rather than the declaration. A declared size
+of 2 GiB or more panics with `lz: buffer is full` instead, and under the
+default `Workers` that panic is in a goroutine the caller cannot recover from.
+So this invariant has an expiry date: when v0.6 lands, re-measure before
+assuming any of the above still holds.
 
 ## House style
 

@@ -171,12 +171,12 @@ Selected by suffix on the cleaned key, for both directions:
 |---|---|---|---|
 | `.gz` | gzip | `compress/gzip` | `compress/gzip` |
 | `.bz2` | bzip2 | `compress/bzip2` | `dsnet/compress/bzip2` |
-| `.xz` | xz / LZMA2 | `xi2/xz` | `ulikunitz/xz` |
+| `.xz` | xz / LZMA2 | `ulikunitz/xz` | `ulikunitz/xz` |
 
 Any other suffix passes through uncompressed. Compression levels are not
 configurable; codec defaults apply.
 
-The two different xz libraries are deliberate — see AGENTS.md §7 and
+The xz reader imposes no dictionary-size limit — see AGENTS.md §7 and
 `todo/004`.
 
 Because the suffix drives both directions independently, `Copy` transcodes:

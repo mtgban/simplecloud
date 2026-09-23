@@ -21,8 +21,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.23.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.109.0
 	github.com/dsnet/compress v0.0.1
-	github.com/ulikunitz/xz v0.5.16
-	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
+	github.com/ulikunitz/xz v0.5.17
 	google.golang.org/api v0.294.0
 )
 
