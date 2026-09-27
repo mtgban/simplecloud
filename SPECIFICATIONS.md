@@ -9,8 +9,8 @@ documentation, it says so.
 One interface over five storage backends for whole-object reads and writes,
 with transparent compression driven by the path extension.
 
-Listing is available on the three cloud backends via the optional `Lister`
-interface (§10).
+Listing is available on the three cloud backends and the local filesystem
+backend via the optional `Lister` interface (§10).
 
 Deliberately **not** provided: deleting, copying server-side, ACL or
 permission management, metadata or content-type control, multipart tuning,
@@ -277,10 +277,10 @@ the corresponding option is left empty.
 
 ## 10. Listing
 
-`Lister` is optional and implemented by `S3Bucket`, `GCSBucket` and
-`B2Bucket`. `FileBucket` and `HTTPBucket` do **not** implement it — HTTP has
-no listing operation at all. Compile-time assertions in `cloud.go` keep the
-three cloud backends conforming.
+`Lister` is optional and implemented by `S3Bucket`, `GCSBucket`, `B2Bucket`
+and `FileBucket`. `HTTPBucket` does **not** implement it: HTTP has no
+listing operation at all. Compile-time assertions in `cloud.go` keep the four
+conforming.
 
 ```go
 for obj, err := range bucket.List(ctx, "magic/") {
@@ -297,7 +297,8 @@ for obj, err := range bucket.List(ctx, "magic/") {
   full rather than collapsed into a common prefix. There are no "folders".
 - **Prefix.** A leading slash is stripped, matching key handling elsewhere.
   An empty prefix lists the whole bucket. A prefix matching nothing yields
-  no objects and no error.
+  no objects and no error. `FileBucket` is the exception to the
+  leading-slash rule (§10.4).
 - **Order** is whatever the backend returns; none is promised.
 - **Pagination** is internal. The iterator fetches further pages as it is
   consumed, so breaking out of the loop stops the requests.
@@ -309,7 +310,7 @@ for obj, err := range bucket.List(ctx, "magic/") {
 
 | Field | Meaning |
 |---|---|
-| `Key` | Full object key, not relative to the prefix, no leading slash |
+| `Key` | Full object key, not relative to the prefix, no leading slash (FileBucket: the filesystem path as given, §10.4) |
 | `Size` | Stored size in bytes — the **compressed** size for a compressed object, not what `InitReader` will yield |
 | `LastModified` | See below |
 
@@ -359,6 +360,45 @@ compile-time assertions only; no credentials were available. Their
 paginators are the standard ones (`ListObjectsV2Paginator`,
 `ObjectIterator`), but see `todo/008` — this package has been misled by
 source reading before.
+
+### 10.4 Local filesystem
+
+`FileBucket` has no bucket root, so its `List` departs from §10.1 in ways the
+other three backends do not:
+
+- **Paths, not keys.** `prefix` and every yielded `Key` are filesystem paths
+  exactly as `NewReader` takes them. A leading slash is significant and is
+  never stripped: stripping it would turn an absolute path into a relative
+  one, which `NewReader` would resolve against the working directory instead
+  of `/`. Every `Key` can be opened directly with `NewReader`.
+- **Prefix is a string match, not a directory filter.** `prefix` may name a
+  directory outright (trailing slash) or a partial file or directory name:
+  `dumps/lorcana/cool` matches `dumps/lorcana/coolstuffinc/retail/CSI.json.xz`
+  because the *string* `"dumps/lorcana/cool"` is a prefix of the *string*
+  `"dumps/lorcana/coolstuffinc/retail/CSI.json.xz"`, independent of where a
+  path separator falls. An empty prefix lists the whole working directory
+  tree. `prefix` is cleaned with `filepath.Clean` before matching, keeping a
+  trailing slash's meaning, so `"./dumps/lorcana/"` and `"dumps//lorcana/"`
+  match the same files as `"dumps/lorcana/"`: `filepath.WalkDir` always
+  yields clean paths, so matching against an uncleaned prefix would
+  otherwise silently match nothing.
+- **The walk starts at the deepest directory the cleaned prefix names or
+  implies**: the directory itself when prefix ends in a separator, otherwise
+  its parent (`filepath.Dir`), and never at `/` or the working directory, so
+  listing a narrow prefix does not read an unrelated part of the filesystem.
+  A prefix whose implied directory does not exist yields no objects and no
+  error, the same as a cloud prefix matching nothing; any other error (for
+  example, a permission failure) is yielded as the final pair per §10.1.
+- **Regular files only.** Directories are never yielded, but the walk
+  descends into every one under the start directory regardless of whether
+  its own name matches `prefix`, filtering by the string check above rather
+  than pruning by directory. A symlink to a regular file is yielded, using
+  the target's size and modification time; a dangling symlink is skipped
+  silently. The walk does not recurse into a symlinked directory, matching
+  `filepath.WalkDir`'s own behaviour; this is not widened further.
+- **`Size` and `LastModified`** come directly from the file's `os.FileInfo`
+  (`ModTime`), so they mean exactly what they do for any local file, unlike
+  the per-backend caveats in §10.2.
 
 ## 11. Versioning
 
