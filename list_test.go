@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -112,16 +115,291 @@ func TestList_ErrorIsYieldedAndEndsIteration(t *testing.T) {
 	}
 }
 
-// Lister is optional, and the documented contract is that the filesystem and
-// HTTP backends do not implement it. Go cannot assert the negative at compile
-// time, so it is pinned here: accidentally adding List to either would change
-// the documented API surface silently.
-func TestList_FileAndHTTPDoNotImplementLister(t *testing.T) {
-	if _, ok := any(&simplecloud.FileBucket{}).(simplecloud.Lister); ok {
-		t.Error("FileBucket implements Lister; SPECIFICATIONS §10 says it does not")
-	}
+// Lister is optional, and the documented contract is that the HTTP backend
+// does not implement it. Go cannot assert the negative at compile time, so it
+// is pinned here: accidentally adding List to it would change the documented
+// API surface silently.
+func TestList_HTTPDoesNotImplementLister(t *testing.T) {
 	if _, ok := any(&simplecloud.HTTPBucket{}).(simplecloud.Lister); ok {
 		t.Error("HTTPBucket implements Lister; HTTP has no listing operation")
+	}
+}
+
+// ---- FileBucket.List ---------------------------------------------------
+
+// newFileListFixture lays out a small nested tree under a fresh t.TempDir()
+// and returns its root plus the content written to each file, keyed by the
+// path relative to root (forward-slashed, matching a listed Key once made
+// relative to root).
+func newFileListFixture(t *testing.T) (root string, files map[string]string) {
+	t.Helper()
+	root = t.TempDir()
+	files = map[string]string{
+		"dumps/lorcana/coolstuffinc/retail/CSI.json.xz": "csi-data",
+		"dumps/lorcana/cardmarket/retail/CM.json.xz":    "cm-data",
+		"dumps/magic/tcgplayer/retail/TCG.json.xz":      "tcg-data",
+		"other.txt": "unrelated",
+	}
+	for rel, content := range files {
+		writeFile(t, filepath.Join(root, filepath.FromSlash(rel)), content)
+	}
+	return root, files
+}
+
+// assertFileList runs bucket.List(ctx, prefix), failing on any error, and
+// checks the returned keys against wantRel (relative to root; both sides are
+// sorted, since order is not part of the contract). Every returned object is
+// also round-tripped through NewReader against the content it was written
+// with, and checked for a non-zero Size and LastModified.
+func assertFileList(t *testing.T, bucket *simplecloud.FileBucket, root string, files map[string]string, prefix string, wantRel []string) {
+	t.Helper()
+
+	var gotRel []string
+	for obj, err := range bucket.List(ctx, prefix) {
+		if err != nil {
+			t.Fatalf("List(%q): %v", prefix, err)
+		}
+
+		// obj.Key is only relative to root as a filesystem path, not as a
+		// string: an absolute prefix yields absolute keys, while listing ""
+		// against a chdir'd root yields keys already relative to it.
+		rel := obj.Key
+		if filepath.IsAbs(rel) {
+			var err error
+			rel, err = filepath.Rel(root, obj.Key)
+			if err != nil {
+				t.Fatalf("key %q is not under root %q: %v", obj.Key, root, err)
+			}
+		}
+		rel = filepath.ToSlash(rel)
+		gotRel = append(gotRel, rel)
+
+		content, ok := files[rel]
+		if !ok {
+			t.Fatalf("unexpected key %q (relative %q)", obj.Key, rel)
+		}
+		if obj.Size != int64(len(content)) {
+			t.Errorf("%q: Size = %d, want %d", rel, obj.Size, len(content))
+		}
+		if obj.LastModified.IsZero() {
+			t.Errorf("%q: LastModified is zero", rel)
+		}
+		if obj.LastModified.After(time.Now().Add(time.Minute)) {
+			t.Errorf("%q: LastModified %s is in the future", rel, obj.LastModified)
+		}
+
+		r, err := bucket.NewReader(ctx, obj.Key)
+		if err != nil {
+			t.Fatalf("NewReader(%q): %v", obj.Key, err)
+		}
+		if got := readAll(t, r); got != content {
+			t.Errorf("%q: round-tripped content = %q, want %q", rel, got, content)
+		}
+	}
+
+	slices.Sort(gotRel)
+	wantSorted := slices.Clone(wantRel)
+	slices.Sort(wantSorted)
+	if !slices.Equal(gotRel, wantSorted) {
+		t.Fatalf("List(%q) keys = %v, want %v", prefix, gotRel, wantSorted)
+	}
+}
+
+func TestFileBucket_List_PrefixMatching(t *testing.T) {
+	root, files := newFileListFixture(t)
+	bucket := &simplecloud.FileBucket{}
+
+	lorcana := []string{
+		"dumps/lorcana/coolstuffinc/retail/CSI.json.xz",
+		"dumps/lorcana/cardmarket/retail/CM.json.xz",
+	}
+
+	cases := []struct {
+		name   string
+		prefix string // joined onto root + "/" below; "" lists root itself
+		want   []string
+	}{
+		{
+			name:   "nested directory prefix without trailing slash",
+			prefix: "dumps/lorcana",
+			want:   lorcana,
+		},
+		{
+			name:   "nested directory prefix with trailing slash",
+			prefix: "dumps/lorcana/",
+			want:   lorcana,
+		},
+		{
+			// The "./" sits after root, so it never leads the joined path,
+			// but filepath.Clean drops a "." element wherever it falls.
+			name:   "dot-slash segment in an otherwise clean prefix",
+			prefix: "./dumps/lorcana/",
+			want:   lorcana,
+		},
+		{
+			name:   "doubled separator in the prefix",
+			prefix: "dumps//lorcana/",
+			want:   lorcana,
+		},
+		{
+			name:   "dot-dot segment in the prefix",
+			prefix: "dumps/magic/../lorcana/",
+			want:   lorcana,
+		},
+		{
+			name:   "partial-name prefix",
+			prefix: "dumps/lorcana/cool",
+			want:   []string{"dumps/lorcana/coolstuffinc/retail/CSI.json.xz"},
+		},
+		{
+			name:   "whole tree",
+			prefix: "",
+			want: []string{
+				"dumps/lorcana/coolstuffinc/retail/CSI.json.xz",
+				"dumps/lorcana/cardmarket/retail/CM.json.xz",
+				"dumps/magic/tcgplayer/retail/TCG.json.xz",
+				"other.txt",
+			},
+		},
+		{
+			// "dumps" exists, so this exercises a walk that finds the
+			// directory but nothing under it matching the prefix.
+			name:   "no match within an existing directory",
+			prefix: "dumps/riftbound",
+			want:   nil,
+		},
+		{
+			// Unlike the case above, "dumps/riftbound" itself does not
+			// exist: the trailing slash makes it the walk's own root, so
+			// this exercises the missing-directory path instead.
+			name:   "missing directory yields nothing and no error",
+			prefix: "dumps/riftbound/",
+			want:   nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := root + "/" + tc.prefix
+			assertFileList(t, bucket, root, files, prefix, tc.want)
+		})
+	}
+}
+
+// TestFileBucket_List_EmptyPrefix pins the literal-empty-string case, which
+// SPECIFICATIONS §10.4 documents as listing the working directory rather than
+// a bucket root: it needs a real chdir, so it is kept separate from the
+// table above, which always joins a relative prefix onto an absolute root.
+func TestFileBucket_List_EmptyPrefix(t *testing.T) {
+	root, files := newFileListFixture(t)
+	t.Chdir(root)
+
+	bucket := &simplecloud.FileBucket{}
+	assertFileList(t, bucket, root, files, "", slices.Collect(maps.Keys(files)))
+}
+
+func TestFileBucket_List_BreakStopsIteration(t *testing.T) {
+	root, _ := newFileListFixture(t)
+	bucket := &simplecloud.FileBucket{}
+
+	// The fixture has more than one matching file, so a bug that kept
+	// walking after a false yield would attempt a second yield call, which
+	// range-over-func turns into a runtime panic rather than a silent extra
+	// iteration.
+	n := 0
+	for range bucket.List(ctx, root+"/") {
+		n++
+		break
+	}
+	if n != 1 {
+		t.Fatalf("iterator produced %d objects after break, want 1", n)
+	}
+}
+
+func TestFileBucket_List_CancelledContext(t *testing.T) {
+	root, _ := newFileListFixture(t)
+	bucket := &simplecloud.FileBucket{}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var seen int
+	var gotErr error
+	for obj, err := range bucket.List(cancelled, root+"/") {
+		seen++
+		if err != nil {
+			gotErr = err
+			if obj.Key != "" {
+				t.Errorf("error pair carried a key %q, want zero value", obj.Key)
+			}
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("iteration produced %d pairs, want 1 (just the cancellation error)", seen)
+	}
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Errorf("got error %v, want one wrapping context.Canceled", gotErr)
+	}
+}
+
+func TestFileBucket_List_Symlinks(t *testing.T) {
+	root, _ := newFileListFixture(t)
+	bucket := &simplecloud.FileBucket{}
+
+	// A symlink to a regular file is followed and yielded, sized and stamped
+	// from the target rather than the link itself.
+	target := filepath.Join(root, filepath.FromSlash("dumps/lorcana/coolstuffinc/retail/CSI.json.xz"))
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link-to-csi.json.xz")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	// A symlink to a directory must not be recursed into, matching
+	// filepath.WalkDir's own behaviour for a symlinked directory.
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "hidden.txt"), "should not be listed")
+	if err := os.Symlink(outside, filepath.Join(root, "dumps", "lorcana-alias")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A dangling symlink has nothing to list, and is skipped without an error.
+	if err := os.Symlink(filepath.Join(root, "missing.json.xz"), filepath.Join(root, "dangling.json.xz")); err != nil {
+		t.Fatal(err)
+	}
+
+	var sawLink bool
+	for obj, err := range bucket.List(ctx, root+"/") {
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		rel, relErr := filepath.Rel(root, obj.Key)
+		if relErr != nil {
+			t.Fatalf("key %q not under root: %v", obj.Key, relErr)
+		}
+		rel = filepath.ToSlash(rel)
+
+		if strings.Contains(rel, "lorcana-alias") {
+			t.Errorf("List recursed into a symlinked directory: %q", rel)
+		}
+		if rel == "dangling.json.xz" {
+			t.Errorf("List yielded a dangling symlink: %q", rel)
+		}
+		if rel == "link-to-csi.json.xz" {
+			sawLink = true
+			if obj.Size != targetInfo.Size() {
+				t.Errorf("symlink Size = %d, want target's %d", obj.Size, targetInfo.Size())
+			}
+			if !obj.LastModified.Equal(targetInfo.ModTime()) {
+				t.Errorf("symlink LastModified = %s, want target's %s", obj.LastModified, targetInfo.ModTime())
+			}
+		}
+	}
+	if !sawLink {
+		t.Error("List did not yield the symlink to a regular file")
 	}
 }
 

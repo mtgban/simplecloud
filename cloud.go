@@ -38,7 +38,8 @@ type ReadWriter interface {
 // ObjectInfo describes a single object returned by a List.
 type ObjectInfo struct {
 	// Key is the object's full key, not relative to the listed prefix, and
-	// carries no leading slash.
+	// carries no leading slash, except from FileBucket, whose keys are
+	// filesystem paths as given (see Lister).
 	Key string
 
 	// Size is the stored size in bytes. For a compressed object this is the
@@ -55,12 +56,16 @@ type ObjectInfo struct {
 
 // Lister is implemented by backends that can enumerate objects.
 //
-// It is optional, in the same way as Aborter: the local filesystem and HTTP
-// backends do not implement it. Type-assert to reach it.
+// It is optional, in the same way as Aborter: the HTTP backend does not
+// implement it, since HTTP has no listing operation. Type-assert to reach it.
 type Lister interface {
 	// List iterates over every object whose key begins with prefix, in
 	// whatever order the backend returns them. A leading slash on prefix is
 	// stripped, and an empty prefix lists the whole bucket.
+	//
+	// FileBucket is the exception: it has no bucket root, so prefix and every
+	// yielded Key are filesystem paths exactly as NewReader takes them, and a
+	// leading slash is significant rather than stripped.
 	//
 	// Pagination is handled internally; the iterator fetches further pages as
 	// it is consumed, so stopping early stops the requests. On failure the
@@ -79,13 +84,14 @@ type Lister interface {
 	List(ctx context.Context, prefix string) iter.Seq2[ObjectInfo, error]
 }
 
-// The cloud backends implement Lister; the filesystem and HTTP backends do
-// not. Asserted here so a signature drift fails the build rather than silently
+// The cloud backends and FileBucket implement Lister; HTTPBucket does not.
+// Asserted here so a signature drift fails the build rather than silently
 // dropping a backend out of the interface.
 var (
 	_ Lister = (*S3Bucket)(nil)
 	_ Lister = (*GCSBucket)(nil)
 	_ Lister = (*B2Bucket)(nil)
+	_ Lister = (*FileBucket)(nil)
 )
 
 // Aborter is implemented by writers that can discard an in-progress write

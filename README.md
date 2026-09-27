@@ -205,9 +205,9 @@ For advanced use cases, use the underlying SDKs directly:
 
 ## Listing
 
-The three cloud backends implement the optional `Lister` interface. Listing
-is flat (no delimiter) and pages internally, so breaking out of the loop
-stops the requests:
+The three cloud backends and the local filesystem backend implement the
+optional `Lister` interface. Listing is flat (no delimiter) and pages
+internally, so breaking out of the loop stops the requests:
 
 ```go
 bucket, err := simplecloud.NewB2Client(ctx, keyID, appKey, "my-bucket")
@@ -223,10 +223,14 @@ for obj, err := range bucket.List(ctx, "magic/") {
 }
 ```
 
-`FileBucket` and `HTTPBucket` do not implement it — HTTP has no listing
-operation. `Size` is the stored (compressed) size, and `LastModified` means
-slightly different things per backend; see
-[SPECIFICATIONS.md §10](SPECIFICATIONS.md).
+`HTTPBucket` does not implement it: HTTP has no listing operation. `Size` is
+the stored (compressed) size, and `LastModified` means slightly different
+things per backend; see [SPECIFICATIONS.md §10](SPECIFICATIONS.md).
+
+`FileBucket` implements `Lister` too, but it has no bucket root: `prefix` and
+every `Key` it returns are filesystem paths exactly as `NewReader` takes
+them, not bucket-relative keys, so a leading slash is significant rather
+than stripped. See [SPECIFICATIONS.md §10.4](SPECIFICATIONS.md).
 
 ## Further documentation
 

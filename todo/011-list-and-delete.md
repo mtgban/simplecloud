@@ -6,7 +6,8 @@
 
 This item originally covered both `List` and `Delete`, and argued both were
 out of scope. `List` has since been implemented for the three cloud backends
-as an optional `Lister` interface — see SPECIFICATIONS §10.
+and the local filesystem backend as an optional `Lister` interface; see
+SPECIFICATIONS §10.
 
 The original objection to `List` was that it has no clean cross-backend
 shape: pagination, prefix/delimiter semantics and the meaning of a
@@ -18,8 +19,13 @@ listing at all. That was resolved rather than ignored:
 - **Delimiters** are simply not offered. Listing is flat, which is the one
   behaviour every backend agrees on; "common prefixes" would have required
   picking a winner between three different models.
-- **HTTP and the filesystem** do not implement the interface at all, rather
-  than implementing it badly. `Lister` is optional, like `Aborter`.
+- **HTTP** does not implement the interface at all, rather than implementing
+  it badly: it has no listing operation. `Lister` is optional, like
+  `Aborter`. The filesystem backend was left out for the same reason at
+  first, but was added once `mtgban-website` needed to list local dev and
+  test dumps the same way it lists a bucket; having no bucket root, it takes
+  `prefix` as a literal filesystem path rather than stripping a leading
+  slash (SPECIFICATIONS §10.4).
 - **`LastModified`** could not be fully normalised, so the difference is
   documented rather than papered over: B2 may report an upload time where
   S3 and GCS report a modification time.
