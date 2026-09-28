@@ -38,8 +38,9 @@ type ReadWriter interface {
 // ObjectInfo describes a single object returned by a List.
 type ObjectInfo struct {
 	// Key is the object's full key, not relative to the listed prefix, and
-	// carries no leading slash, except from FileBucket, whose keys are
-	// filesystem paths as given (see Lister).
+	// carries no leading slash. A FileBucket's keys are relative to its Root,
+	// slash-separated, when it has one, and filesystem paths as given when it
+	// does not (see Lister).
 	Key string
 
 	// Size is the stored size in bytes. For a compressed object this is the
@@ -63,7 +64,8 @@ type Lister interface {
 	// whatever order the backend returns them. A leading slash on prefix is
 	// stripped, and an empty prefix lists the whole bucket.
 	//
-	// FileBucket is the exception: it has no bucket root, so prefix and every
+	// A FileBucket with a Root lists the tree under it the same way, with keys
+	// relative to Root. Without one it is the exception: prefix and every
 	// yielded Key are filesystem paths exactly as NewReader takes them, and a
 	// leading slash is significant rather than stripped.
 	//

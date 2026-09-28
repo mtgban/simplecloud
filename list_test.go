@@ -3,6 +3,7 @@ package simplecloud_test
 import (
 	"context"
 	"errors"
+	"io"
 	"iter"
 	"maps"
 	"os"
@@ -401,6 +402,225 @@ func TestFileBucket_List_Symlinks(t *testing.T) {
 	if !sawLink {
 		t.Error("List did not yield the symlink to a regular file")
 	}
+}
+
+// ---- FileBucket with a Root ---------------------------------------------
+
+// TestFileBucket_Root_RoundTrip writes a bucket-shaped tree through NewWriter,
+// lists prefixes of it and reads every listed key back through NewReader, all
+// under a Root and with no chdir. The keys must be exactly what a bucket
+// returns: relative to Root and slash-separated.
+func TestFileBucket_Root_RoundTrip(t *testing.T) {
+	root := t.TempDir()
+	bucket := &simplecloud.FileBucket{Root: root}
+
+	files := map[string]string{
+		"magic/tcgplayer/retail/TCG.json.xz":         "tcg-data",
+		"magic/cardkingdom/buylist/CK.json.xz":       "ck-data",
+		"magic-archive/tcgplayer/retail/TCG.json.xz": "archived-tcg-data",
+		"lorcana/coolstuffinc/retail/CSI.json.xz":    "csi-data",
+		"mage.txt": "partial-name sibling",
+	}
+	for key, content := range files {
+		w, err := bucket.NewWriter(ctx, key)
+		if err != nil {
+			t.Fatalf("NewWriter(%q): %v", key, err)
+		}
+		_, err = io.WriteString(w, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = w.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(key)))
+		if err != nil {
+			t.Fatalf("%q was not written under Root: %v", key, err)
+		}
+		if string(raw) != content {
+			t.Fatalf("%q under Root holds %q, want %q", key, raw, content)
+		}
+	}
+
+	magic := []string{
+		"magic/tcgplayer/retail/TCG.json.xz",
+		"magic/cardkingdom/buylist/CK.json.xz",
+	}
+	magicPartial := append(slices.Clone(magic), "magic-archive/tcgplayer/retail/TCG.json.xz")
+	all := slices.Collect(maps.Keys(files))
+
+	cases := []struct {
+		name   string
+		prefix string
+		want   []string
+	}{
+		{name: "directory with trailing slash", prefix: "magic/", want: magic},
+		{name: "partial name", prefix: "magic", want: magicPartial},
+		{name: "shorter partial name", prefix: "mag", want: append(slices.Clone(magicPartial), "mage.txt")},
+		{name: "empty prefix lists all of Root", prefix: "", want: all},
+		{name: "dot lists all of Root", prefix: ".", want: all},
+		{name: "leading slash is ignored", prefix: "/magic/", want: magic},
+		{name: "lone slash lists all of Root", prefix: "/", want: all},
+		{
+			name:   "unclean prefix",
+			prefix: "./magic//tcgplayer/../cardkingdom/",
+			want:   []string{"magic/cardkingdom/buylist/CK.json.xz"},
+		},
+		{
+			name:   "full key",
+			prefix: "lorcana/coolstuffinc/retail/CSI.json.xz",
+			want:   []string{"lorcana/coolstuffinc/retail/CSI.json.xz"},
+		},
+		{name: "no match within an existing directory", prefix: "magic/starcitygames", want: nil},
+		{name: "missing directory", prefix: "riftbound/", want: nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for obj, err := range bucket.List(ctx, tc.prefix) {
+				if err != nil {
+					t.Fatalf("List(%q): %v", tc.prefix, err)
+				}
+				got = append(got, obj.Key)
+
+				content, ok := files[obj.Key]
+				if !ok {
+					t.Fatalf("List(%q) yielded %q, which is not a key relative to Root", tc.prefix, obj.Key)
+				}
+				if obj.Size != int64(len(content)) {
+					t.Errorf("%q: Size = %d, want %d", obj.Key, obj.Size, len(content))
+				}
+				r, err := bucket.NewReader(ctx, obj.Key)
+				if err != nil {
+					t.Fatalf("NewReader(%q): %v", obj.Key, err)
+				}
+				data := readAll(t, r)
+				if data != content {
+					t.Errorf("%q: read back %q, want %q", obj.Key, data, content)
+				}
+			}
+
+			slices.Sort(got)
+			want := slices.Clone(tc.want)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Fatalf("List(%q) keys = %v, want %v", tc.prefix, got, want)
+			}
+		})
+	}
+}
+
+func TestFileBucket_Root_MissingRootListsNothing(t *testing.T) {
+	bucket := &simplecloud.FileBucket{Root: filepath.Join(t.TempDir(), "missing")}
+
+	for _, prefix := range []string{"", "magic/"} {
+		for obj, err := range bucket.List(ctx, prefix) {
+			t.Errorf("List(%q) on a missing Root yielded (%q, %v), want nothing", prefix, obj.Key, err)
+		}
+	}
+}
+
+func TestFileBucket_Root_ListSymlinks(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "magic", "TCG.json.xz")
+	writeFile(t, target, "tcg-data")
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Relative links inside Root: to a file, which is listed under the link's
+	// own key; to a directory, which is not recursed into; and a dangling one,
+	// which is skipped.
+	links := map[string]string{
+		"magic/latest.json.xz":   "TCG.json.xz",
+		"magic-alias":            "magic",
+		"magic/dangling.json.xz": "missing.json.xz",
+	}
+	for link, dest := range links {
+		err := os.Symlink(dest, filepath.Join(root, filepath.FromSlash(link)))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bucket := &simplecloud.FileBucket{Root: root}
+	listed := func(t *testing.T, prefix string) map[string]simplecloud.ObjectInfo {
+		t.Helper()
+		got := map[string]simplecloud.ObjectInfo{}
+		for obj, err := range bucket.List(ctx, prefix) {
+			if err != nil {
+				t.Fatalf("List(%q): %v", prefix, err)
+			}
+			got[obj.Key] = obj
+		}
+		return got
+	}
+
+	got := listed(t, "")
+	want := []string{"magic/TCG.json.xz", "magic/latest.json.xz"}
+	if !slices.Equal(slices.Sorted(maps.Keys(got)), want) {
+		t.Fatalf("List keys = %v, want %v", slices.Sorted(maps.Keys(got)), want)
+	}
+	link := got["magic/latest.json.xz"]
+	if link.Size != targetInfo.Size() || !link.LastModified.Equal(targetInfo.ModTime()) {
+		t.Errorf("link listed with size %d at %s, want the target's %d at %s",
+			link.Size, link.LastModified, targetInfo.Size(), targetInfo.ModTime())
+	}
+
+	// The directory a walk starts from is walked even when it is a link.
+	got = listed(t, "magic-alias/")
+	want = []string{"magic-alias/TCG.json.xz", "magic-alias/latest.json.xz"}
+	if !slices.Equal(slices.Sorted(maps.Keys(got)), want) {
+		t.Errorf("List(%q) keys = %v, want %v", "magic-alias/", slices.Sorted(maps.Keys(got)), want)
+	}
+
+	// A link os.Root will not follow ends the listing with an error: one out
+	// of Root, and an absolute one even when it points back inside.
+	refused := func(t *testing.T, root string) {
+		t.Helper()
+		var gotErr error
+		for obj, err := range (&simplecloud.FileBucket{Root: root}).List(ctx, "") {
+			if err != nil {
+				gotErr = err
+				continue
+			}
+			if obj.Key == "link.json.xz" {
+				t.Errorf("List yielded %q, a link os.Root refuses", obj.Key)
+			}
+		}
+		if gotErr == nil {
+			t.Fatal("List followed the link without an error")
+		}
+		t.Logf("List: %v", gotErr)
+	}
+
+	t.Run("relative link out of Root", func(t *testing.T) {
+		root, outside := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(outside, "secret.json.xz"), "outside Root")
+		up, err := filepath.Rel(root, outside)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = os.Symlink(filepath.Join(up, "secret.json.xz"), filepath.Join(root, "link.json.xz"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		refused(t, root)
+	})
+
+	t.Run("absolute link back inside Root", func(t *testing.T) {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "a.json.xz"), "inside Root")
+		err := os.Symlink(filepath.Join(root, "a.json.xz"), filepath.Join(root, "link.json.xz"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		refused(t, root)
+	})
 }
 
 // TestList_LiveB2 exercises the real B2 implementation. It is skipped unless

@@ -210,6 +210,120 @@ func TestFileBucket_ReaderMissingFile(t *testing.T) {
 	}
 }
 
+func TestFileBucket_Root_LeadingSlashIsIgnored(t *testing.T) {
+	// Through InitWriter and InitReader, which hand the bucket the key as
+	// given, so the slash reaches NewWriter and NewReader themselves.
+	root := t.TempDir()
+	bucket := &simplecloud.FileBucket{Root: root}
+	const want = "under Root"
+
+	w, err := simplecloud.InitWriter(ctx, bucket, "/magic/x.json.xz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = io.WriteString(w, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = os.Stat(filepath.Join(root, "magic", "x.json.xz"))
+	if err != nil {
+		t.Fatalf("not written inside Root: %v", err)
+	}
+
+	// A bucket URL reduces to the same slashed key, so it resolves inside
+	// Root too.
+	for _, path := range []string{"magic/x.json.xz", "/magic/x.json.xz", "//magic/x.json.xz", "b2://bucket/magic/x.json.xz"} {
+		r, err := simplecloud.InitReader(ctx, bucket, path)
+		if err != nil {
+			t.Fatalf("InitReader(%q): %v", path, err)
+		}
+		got := readAll(t, r)
+		if got != want {
+			t.Errorf("InitReader(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestFileBucket_Root_RefusesEscape(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(root, "magic", "x.json.xz"), "inside Root")
+	writeFile(t, filepath.Join(outside, "secret.txt"), "outside Root")
+
+	// up is the way out of Root to outside, e.g. "../002".
+	up, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up = filepath.ToSlash(up)
+
+	links := map[string]string{
+		"abs.txt": filepath.Join(outside, "secret.txt"),
+		"rel.txt": up + "/secret.txt",
+		"outdir":  outside,
+	}
+	for link, dest := range links {
+		err := os.Symlink(dest, filepath.Join(root, link))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bucket := &simplecloud.FileBucket{Root: root}
+
+	reads := []string{
+		up + "/secret.txt",
+		"/" + up + "/secret.txt",
+		"magic/../" + up + "/secret.txt",
+		"abs.txt",
+		"rel.txt",
+		"outdir/secret.txt",
+	}
+	for _, path := range reads {
+		r, err := bucket.NewReader(ctx, path)
+		if err == nil {
+			r.Close()
+			t.Errorf("NewReader(%q) read outside Root", path)
+			continue
+		}
+		t.Logf("NewReader(%q): %v", path, err)
+	}
+
+	for _, path := range []string{up + "/new.txt", "outdir/new.txt"} {
+		w, err := bucket.NewWriter(ctx, path)
+		if err == nil {
+			w.Close()
+			t.Errorf("NewWriter(%q) wrote outside Root", path)
+			continue
+		}
+		t.Logf("NewWriter(%q): %v", path, err)
+	}
+	_, err = os.Stat(filepath.Join(outside, "new.txt"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused NewWriter still created a file outside Root (stat: %v)", err)
+	}
+
+	for _, prefix := range []string{"../", up + "/"} {
+		var gotErr error
+		for obj, err := range bucket.List(ctx, prefix) {
+			if err != nil {
+				gotErr = err
+				continue
+			}
+			t.Errorf("List(%q) yielded %q from outside Root", prefix, obj.Key)
+		}
+		if gotErr == nil {
+			t.Errorf("List(%q) was not refused", prefix)
+			continue
+		}
+		t.Logf("List(%q): %v", prefix, gotErr)
+	}
+}
+
 // ---- HTTPBucket -------------------------------------------------------------
 
 func TestHTTPBucket_NewReader(t *testing.T) {
@@ -587,6 +701,22 @@ func TestCopy_AbortRemovesPartialLocalFile(t *testing.T) {
 	if _, statErr := os.Stat(dst); !errors.Is(statErr, os.ErrNotExist) {
 		got, _ := os.ReadFile(dst)
 		t.Fatalf("partial file left behind with contents %q", got)
+	}
+}
+
+func TestCopy_AbortRemovesPartialFileUnderRoot(t *testing.T) {
+	// Abort removes the file by the name os.Root gave it, which must be its
+	// path inside Root rather than the key alone.
+	root := t.TempDir()
+	bucket := &simplecloud.FileBucket{Root: root}
+
+	_, err := simplecloud.Copy(ctx, failingBucket{}, bucket, "src.txt", "out/partial.txt")
+	if err == nil {
+		t.Fatal("expected error from failing source, got nil")
+	}
+	_, err = os.Stat(filepath.Join(root, "out", "partial.txt"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial file left behind under Root (stat: %v)", err)
 	}
 }
 

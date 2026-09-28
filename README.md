@@ -12,7 +12,7 @@ go get github.com/mtgban/simplecloud
 
 | Backend | Read | Write | Constructor |
 |---------|------|-------|-------------|
-| Local filesystem | ✓ | ✓ | `&FileBucket{}` |
+| Local filesystem | ✓ | ✓ | `&FileBucket{}`, or `&FileBucket{Root: dir}` |
 | HTTP/HTTPS | ✓ | — | `NewHTTPBucket(client, baseURL)` |
 | Backblaze B2 | ✓ | ✓ | `NewB2Client(ctx, accessKey, secretKey, bucket)` |
 | Google Cloud Storage | ✓ | ✓ | `NewGCSClient(ctx, serviceAccountFile, bucket)` |
@@ -80,6 +80,35 @@ preserved on every request; the per-call path is joined onto it. For example, a
 base of `https://host/v1` reading `/data.json` requests
 `https://host/v1/data.json`. Any credentials in the base URL are reused and
 redacted from error messages.
+
+### A local directory as a bucket
+
+A `FileBucket` with a `Root` resolves every path inside that directory, so a
+directory laid out like a bucket can stand in for it, with no `chdir`:
+
+```go
+bucket := &simplecloud.FileBucket{Root: "/srv/dumps"}
+
+for obj, err := range bucket.List(ctx, "magic/") {
+    if err != nil {
+        log.Fatal(err)
+    }
+    // obj.Key is "magic/...", relative to Root, as B2 would return it.
+    r, err := simplecloud.InitReader(ctx, bucket, obj.Key)
+    if err != nil {
+        log.Fatal(err)
+    }
+    // ...
+    r.Close()
+}
+```
+
+A leading slash is ignored, as on the cloud backends, so `/magic/x.json.xz`
+and `magic/x.json.xz` name the same file. A path that would leave `Root`,
+through `..` or a symbolic link, is refused with an error. `NewWriter` creates
+any missing directories, `Root` included. A `FileBucket` without a `Root`
+takes every path exactly as given, relative to the working directory or
+absolute.
 
 ## Transparent Compression
 
@@ -227,10 +256,12 @@ for obj, err := range bucket.List(ctx, "magic/") {
 the stored (compressed) size, and `LastModified` means slightly different
 things per backend; see [SPECIFICATIONS.md §10](SPECIFICATIONS.md).
 
-`FileBucket` implements `Lister` too, but it has no bucket root: `prefix` and
-every `Key` it returns are filesystem paths exactly as `NewReader` takes
-them, not bucket-relative keys, so a leading slash is significant rather
-than stripped. See [SPECIFICATIONS.md §10.4](SPECIFICATIONS.md).
+`FileBucket` implements `Lister` too. With a `Root`, its keys are relative to
+that directory and slash-separated, exactly as a bucket's are. Without one,
+`prefix` and every `Key` it returns are filesystem paths exactly as
+`NewReader` takes them, not bucket-relative keys, so a leading slash is
+significant rather than stripped. See
+[SPECIFICATIONS.md §10.4](SPECIFICATIONS.md).
 
 ## Further documentation
 

@@ -55,7 +55,7 @@ in §6 and §10.
 
 | Backend | Read | Write | Constructor |
 |---|---|---|---|
-| Local filesystem | ✓ | ✓ | `&FileBucket{}` |
+| Local filesystem | ✓ | ✓ | `&FileBucket{}`, or `&FileBucket{Root: dir}` |
 | HTTP / HTTPS | ✓ | — | `NewHTTPBucket(client, baseURL)` |
 | Backblaze B2 | ✓ | ✓ | `NewB2Client(ctx, keyID, appKey, bucket)` |
 | Google Cloud Storage | ✓ | ✓ | `NewGCSClient(ctx, serviceAccountFile, bucket)` |
@@ -63,10 +63,25 @@ in §6 and §10.
 
 ### 3.1 Local filesystem
 
-`NewWriter` creates missing parent directories with mode `0755` and
-truncates any existing file. The `ctx` parameter is accepted to satisfy the
-interface and is unused — local file operations are not cancellable. The
-returned writer implements `Aborter`.
+Without a `Root`, every path is used exactly as given, relative to the
+working directory or absolute.
+
+With `Root` set, every path is resolved inside that directory, so a
+directory laid out like a bucket stands in for one:
+
+- A leading slash is ignored, as on the cloud backends (§4): `/magic/x` and
+  `magic/x` name the same file.
+- A path that would leave `Root` is refused with an error, whether through
+  `..` or through a symbolic link. Paths are resolved with `os.Root`, which
+  follows a link only when its target is relative and stays inside `Root`,
+  so an absolute link is refused even when it points back inside.
+- `Root` is opened afresh on every call, and nothing is held open between
+  calls.
+
+`NewWriter` creates missing parent directories with mode `0755`, `Root`
+included, and truncates any existing file. The `ctx` parameter is accepted
+to satisfy the interface and is unused: local file operations are not
+cancellable. The returned writer implements `Aborter`.
 
 ### 3.2 HTTP
 
@@ -126,13 +141,16 @@ must survive.
 
 Each cloud backend then strips leading slashes from the key. This is
 required, not cosmetic — see AGENTS.md §4.
+A `FileBucket` with a `Root` strips them too, since `os.Root` refuses an
+absolute name; one without keeps them, since there a leading slash makes the
+path absolute.
 
 ### 4.1 Worked examples
 
 | Input | Key passed to the backend |
 |---|---|
 | `magic/x.json.xz` | `magic/x.json.xz` |
-| `/magic/x.json.xz` | `/magic/x.json.xz`, then `magic/x.json.xz` on B2/S3/GCS |
+| `/magic/x.json.xz` | `/magic/x.json.xz`, then `magic/x.json.xz` on B2/S3/GCS and a rooted `FileBucket` |
 | `b2://bucket/magic/x.json.xz` | `/magic/x.json.xz` → `magic/x.json.xz` |
 | `https://host/v1/obj.gz?sig=abc` | `/v1/obj.gz` |
 | `/data/50%off.json.gz` | unchanged — `%` preserved |
@@ -297,8 +315,8 @@ for obj, err := range bucket.List(ctx, "magic/") {
   full rather than collapsed into a common prefix. There are no "folders".
 - **Prefix.** A leading slash is stripped, matching key handling elsewhere.
   An empty prefix lists the whole bucket. A prefix matching nothing yields
-  no objects and no error. `FileBucket` is the exception to the
-  leading-slash rule (§10.4).
+  no objects and no error. A `FileBucket` without a `Root` is the exception
+  to the leading-slash rule (§10.4).
 - **Order** is whatever the backend returns; none is promised.
 - **Pagination** is internal. The iterator fetches further pages as it is
   consumed, so breaking out of the loop stops the requests.
@@ -310,7 +328,7 @@ for obj, err := range bucket.List(ctx, "magic/") {
 
 | Field | Meaning |
 |---|---|
-| `Key` | Full object key, not relative to the prefix, no leading slash (FileBucket: the filesystem path as given, §10.4) |
+| `Key` | Full object key, not relative to the prefix, no leading slash (FileBucket: relative to its `Root`, or without one the filesystem path as given, §10.4) |
 | `Size` | Stored size in bytes — the **compressed** size for a compressed object, not what `InitReader` will yield |
 | `LastModified` | See below |
 
@@ -363,25 +381,35 @@ source reading before.
 
 ### 10.4 Local filesystem
 
-`FileBucket` has no bucket root, so its `List` departs from §10.1 in ways the
-other three backends do not:
+`FileBucket`'s `List` walks a directory tree, and what `prefix` and `Key`
+mean depends on whether the bucket has a `Root` (§3.1):
 
-- **Paths, not keys.** `prefix` and every yielded `Key` are filesystem paths
-  exactly as `NewReader` takes them. A leading slash is significant and is
-  never stripped: stripping it would turn an absolute path into a relative
-  one, which `NewReader` would resolve against the working directory instead
-  of `/`. Every `Key` can be opened directly with `NewReader`.
+- **With a `Root`, keys.** `prefix` and every yielded `Key` are relative to
+  `Root` and slash-separated, as B2 returns them, and a leading slash on
+  `prefix` is ignored. Every `Key` can be opened with `NewReader`. A prefix
+  that would leave `Root`, such as `../`, is refused with an error, and a
+  missing `Root` yields no objects and no error.
+- **Without a `Root`, paths.** `prefix` and every yielded `Key` are
+  filesystem paths exactly as `NewReader` takes them. A leading slash is
+  significant and is never stripped: stripping it would turn an absolute
+  path into a relative one, which `NewReader` would resolve against the
+  working directory instead of `/`. Every `Key` can be opened directly with
+  `NewReader`.
+
+Either way, `List` departs from §10.1 in ways the other three backends do
+not, with paths read relative to `Root` when there is one:
+
 - **Prefix is a string match, not a directory filter.** `prefix` may name a
   directory outright (trailing slash) or a partial file or directory name:
   `dumps/lorcana/cool` matches `dumps/lorcana/coolstuffinc/retail/CSI.json.xz`
   because the *string* `"dumps/lorcana/cool"` is a prefix of the *string*
   `"dumps/lorcana/coolstuffinc/retail/CSI.json.xz"`, independent of where a
-  path separator falls. An empty prefix lists the whole working directory
-  tree. `prefix` is cleaned with `filepath.Clean` before matching, keeping a
-  trailing slash's meaning, so `"./dumps/lorcana/"` and `"dumps//lorcana/"`
-  match the same files as `"dumps/lorcana/"`: `filepath.WalkDir` always
-  yields clean paths, so matching against an uncleaned prefix would
-  otherwise silently match nothing.
+  path separator falls. An empty prefix lists the whole tree: `Root`'s, or
+  else the working directory's. `prefix` is cleaned with `filepath.Clean`
+  before matching, keeping a trailing slash's meaning, so
+  `"./dumps/lorcana/"` and `"dumps//lorcana/"` match the same files as
+  `"dumps/lorcana/"`: the walk always yields clean paths, so matching
+  against an uncleaned prefix would otherwise silently match nothing.
 - **The walk starts at the deepest directory the cleaned prefix names or
   implies**: the directory itself when prefix ends in a separator, otherwise
   its parent (`filepath.Dir`), and never at `/` or the working directory, so
@@ -396,6 +424,13 @@ other three backends do not:
   the target's size and modification time; a dangling symlink is skipped
   silently. The walk does not recurse into a symlinked directory, matching
   `filepath.WalkDir`'s own behaviour; this is not widened further.
+- **Symlinks under a `Root`** resolve inside it, through `os.Root`. A link
+  that is absolute, even one pointing back inside, or whose target leaves
+  `Root`, ends the listing with an error, as `NewReader` would refuse it,
+  whether it points at a file, a directory or nothing. The directory the walk
+  starts from is walked even when it is itself a symlink to a directory
+  inside `Root`: `fs.WalkDir` stats its start, where `filepath.WalkDir`
+  lstats it.
 - **`Size` and `LastModified`** come directly from the file's `os.FileInfo`
   (`ModTime`), so they mean exactly what they do for any local file, unlike
   the per-backend caveats in §10.2.

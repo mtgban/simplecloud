@@ -23,7 +23,8 @@ listing at all. That was resolved rather than ignored:
   it badly: it has no listing operation. `Lister` is optional, like
   `Aborter`. The filesystem backend was left out for the same reason at
   first, but was added once `mtgban-website` needed to list local dev and
-  test dumps the same way it lists a bucket; having no bucket root, it takes
+  test dumps the same way it lists a bucket. Given a `Root`, it lists keys
+  relative to that directory as a bucket does; without one, it takes
   `prefix` as a literal filesystem path rather than stripping a leading
   slash (SPECIFICATIONS §10.4).
 - **`LastModified`** could not be fully normalised, so the difference is
