@@ -121,6 +121,14 @@ Verified against a live bucket: before the fix a 150 MiB failing transfer
 left an entry in `b2_list_unfinished_large_files`; after it, three
 consecutive runs left nothing.
 
+The option has a cost. With it, `setErr` cancels the large file on any
+error, through a nil `w.file` when none was started, and so panics
+(Backblaze/blazer#54). Under the 100 MB `ChunkSize` a refused, timed-out or
+aborted upload panics in `Close`; over it, a failed `b2_start_large_file`
+panics in `Write`. `b2Writer` recovers both and returns the error blazer
+recorded before panicking. Drop the wrapper, not the option, once a blazer
+release fixes #54: see `todo/013-drop-b2writer.md`.
+
 ### 6. `s3PipeWriter.Abort`'s ordering is load-bearing.
 
 `manager.Uploader` issues `AbortMultipartUpload` on the *same* context
@@ -164,7 +172,9 @@ this repo were verified that way and it caught a wrong first attempt.
 Cloud behaviour is faked with `commitBucket`, which models the real
 semantics: `Close` records `committed`, `Abort` records `aborted`, and
 `failWrites` makes a compressor fail to initialise. Prefer extending it over
-writing a new fake.
+writing a new fake. Behaviour inside blazer, which `commitBucket` replaces
+and so cannot reach, is faked one level down by `refusingB2`, an `httptest`
+fake of the B2 HTTP API: extend that one instead.
 
 Be aware that mocks were **not** sufficient historically: the B2 large-file
 leak passed every mock test and the small-file live test, and only appeared

@@ -17,6 +17,7 @@ Ordered roughly by value, not by number.
 | [008](008-verify-s3-gcs-abort.md) | Verify S3/GCS abort against live buckets | Blocked: no credentials |
 | [003](003-s3-transfermanager.md) | Migrate off deprecated `manager.Uploader` | Blocked: replacement is pre-1.0 |
 | [004](004-consolidate-xz-libraries.md) | Drop one of the two xz libraries | Blocked: upstream bug |
+| [013](013-drop-b2writer.md) | Drop `b2Writer` once blazer fixes #54 | Blocked: upstream bug |
 | [007](007-s3-config-struct.md) | Replace `NewS3Client`'s six string params | Breaking; needs a decision |
 | [009](009-revive-test-file-gap.md) | Lint gate misses test files locally | Open question |
 | [010](010-open-client-lifecycle.md) | `Open` never closes S3/GCS clients | Documented; needs a real fix |
