@@ -10,8 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/Backblaze/blazer/b2"
 	"github.com/mtgban/simplecloud"
 )
 
@@ -405,6 +408,155 @@ func TestHTTPBucket_NilClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Close()
+}
+
+// ---- B2Bucket ---------------------------------------------------------------
+
+// refusingB2 fakes just enough of the B2 HTTP API for blazer to open a bucket
+// and start an upload, small or large, then refuses the upload itself. It also
+// returns a count of the requests that reach /upload. opts go to blazer's
+// client.
+func refusingB2(t *testing.T, opts ...b2.ClientOption) (*simplecloud.B2Bucket, *atomic.Int32) {
+	t.Helper()
+	uploads := new(atomic.Int32)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		self := "http://" + r.Host
+		switch r.URL.Path {
+		case "/b2api/v3/b2_authorize_account":
+			io.WriteString(w, `{"accountId": "id", "authorizationToken": "token", "apiInfo": {"storageApi": {"apiUrl": "`+self+`", "downloadUrl": "`+self+`"}}}`)
+		case "/b2api/v3/b2_list_buckets":
+			io.WriteString(w, `{"buckets": [{"bucketId": "id", "bucketName": "bucket"}]}`)
+		case "/b2api/v3/b2_get_upload_url":
+			io.WriteString(w, `{"uploadUrl": "`+self+`/upload", "authorizationToken": "token"}`)
+		case "/upload":
+			uploads.Add(1)
+			fallthrough
+		case "/b2api/v3/b2_start_large_file":
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"status": 400, "code": "bad_request", "message": "refused"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	opts = append([]b2.ClientOption{b2.APIBase(srv.URL)}, opts...)
+	client, err := b2.NewClient(ctx, "id", "key", opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket, err := client.Bucket(ctx, "bucket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &simplecloud.B2Bucket{Bucket: bucket}, uploads
+}
+
+// tinyChunks lowers blazer's large-file threshold to 8 bytes, so that a short
+// payload starts a large file.
+var tinyChunks = b2.DefaultWriterOptions(func(w *b2.Writer) { w.ChunkSize = 8 })
+
+// panickyTransport panics with itself on a request to the path it names,
+// standing in for a failure inside blazer that, unlike #54, records no error.
+type panickyTransport string
+
+func (p panickyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == string(p) {
+		panic(p)
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// panicValue runs f and returns what it panicked with, or nil.
+func panicValue(f func()) (r any) {
+	defer func() {
+		r = recover()
+	}()
+	f()
+	return nil
+}
+
+// TestB2Bucket_FailedUploadReturnsError runs failed uploads through blazer's
+// own writer, against a fake of the B2 HTTP API. Extending commitBucket would
+// not reach the bug, which is inside blazer: with WithCancelOnError it cancels
+// a large file that was never started, and panics (Backblaze/blazer#54).
+func TestB2Bucket_FailedUploadReturnsError(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     simplecloud.Reader
+		opts    []b2.ClientOption
+		want    string
+		uploads int32
+	}{
+		// The transfer succeeds, so Copy closes the writer, which uploads.
+		{"refused", &stringBucket{content: "small payload"}, nil, "refused", 1},
+		// Nothing is written, which takes blazer's other branch through Close.
+		{"empty", &stringBucket{content: ""}, nil, "refused", 1},
+		// The source fails, so Copy aborts, which must upload nothing.
+		{"aborted", failingBucket{}, nil, "network died mid-stream", 0},
+		// Write crosses ChunkSize and starts a large file, which is refused.
+		{"large", &stringBucket{content: "large payload"}, []b2.ClientOption{tinyChunks}, "refused", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, uploads := refusingB2(t, tt.opts...)
+			var err error
+			r := panicValue(func() {
+				_, err = simplecloud.Copy(ctx, tt.src, bucket, "src.txt", "dst.txt")
+			})
+			if r != nil {
+				t.Fatalf("Copy panicked: %v", r)
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Copy error = %v, want one containing %q", err, tt.want)
+			}
+			if uploads.Load() != tt.uploads {
+				t.Errorf("uploads reaching B2: %d, want %d", uploads.Load(), tt.uploads)
+			}
+		})
+	}
+}
+
+// TestB2Bucket_UnrecordedPanicIsRaised pins the other side: a panic that
+// blazer recorded no error for comes back with its own value rather than as a
+// result, through a caller's deferred Close too.
+func TestB2Bucket_UnrecordedPanicIsRaised(t *testing.T) {
+	t.Run("close", func(t *testing.T) {
+		transport := panickyTransport("/upload")
+		bucket, _ := refusingB2(t, b2.Transport(transport))
+		var n int64
+		var err error
+		r := panicValue(func() {
+			n, err = simplecloud.Copy(ctx, &stringBucket{content: "small payload"}, bucket, "src.txt", "dst.txt")
+		})
+		if r != transport {
+			t.Fatalf("Copy panicked with %v and returned n=%d, err=%v; want it to panic with %q", r, n, err, transport)
+		}
+	})
+
+	t.Run("write", func(t *testing.T) {
+		transport := panickyTransport("/b2api/v3/b2_start_large_file")
+		bucket, _ := refusingB2(t, b2.Transport(transport), tinyChunks)
+
+		// A Write retried with no error recorded blocks until its context
+		// ends, so a deadline turns that regression into a failure, not a hang.
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		w, err := simplecloud.InitWriter(ctx, bucket, "dst.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := panicValue(func() {
+			defer w.Close()
+			io.WriteString(w, "large payload")
+		})
+		if ctx.Err() != nil {
+			t.Fatalf("Write blocked until its context ended, then panicked with %v", r)
+		}
+		if r != transport {
+			t.Fatalf("Write panicked with %v, want %q", r, transport)
+		}
+	})
 }
 
 // ---- compression (InitReader / InitWriter) ----------------------------------

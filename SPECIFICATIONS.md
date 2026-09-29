@@ -96,6 +96,11 @@ A nil client at construction becomes `http.DefaultClient`.
 
 `ConcurrentDownloads` sets the number of parallel range requests; zero uses
 blazer's default. Writers are created with `b2.WithCancelOnError` — see §6.3.
+That option makes blazer panic where it should return an error
+(Backblaze/blazer#54): in `Close`, when an upload under its 100 MB
+large-file threshold is refused, times out or is aborted, and in `Write`,
+when `b2_start_large_file` fails for a larger one. The writer recovers the
+panic and returns the error blazer recorded instead.
 
 ### 3.4 Google Cloud Storage
 
@@ -212,8 +217,10 @@ the closer list.
 
 **Verification status.** The local and compressed paths are covered by
 offline tests. The B2 path is verified against a live bucket, including a
-150 MiB transfer that crosses blazer's 100 MB large-file threshold. The
-S3 and GCS paths are verified by source reading only — no credentials were
+150 MiB transfer that crosses blazer's 100 MB large-file threshold.
+Offline, `TestB2Bucket_FailedUploadReturnsError` runs blazer's writer
+against a fake of the B2 HTTP API and pins that an aborted small upload
+sends nothing. The S3 and GCS paths are verified by source reading only — no credentials were
 available. See `todo/008`.
 
 **GCS residue:** incomplete resumable uploads never appear in the bucket and
