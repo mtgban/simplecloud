@@ -6,11 +6,11 @@ them produced silent data corruption in production, not hypothetically.
 
 ## What this is
 
-`github.com/mtgban/simplecloud` is a small Go library (~900 lines of
-non-test code) giving one interface over five storage backends: the local
-filesystem, HTTP(S), Backblaze B2, Google Cloud Storage and Amazon S3
-(including S3-compatible stores). It is consumed by `go-mtgban`, which uses
-it to publish and read compressed datastore dumps.
+`github.com/mtgban/simplecloud` is a small Go library giving one interface
+over five storage backends: the local filesystem, HTTP(S), Backblaze B2,
+Google Cloud Storage and Amazon S3 (including S3-compatible stores). It is
+consumed by `go-mtgban`, which uses it to publish and read compressed
+datastore dumps.
 
 `SPECIFICATIONS.md` describes the behaviour contract. `todo/` holds known
 improvements that are deliberately not done yet, each with the reasoning.
@@ -165,7 +165,8 @@ it.
 
 ## Testing expectations
 
-26 tests, all offline — no credentials or network beyond `httptest`. New
+Tests run offline — no credentials or network beyond `httptest` — except
+`TestList_LiveB2`, which skips unless B2 credentials are set. New
 behaviour needs a test that **fails without the change**; several fixes in
 this repo were verified that way and it caught a wrong first attempt.
 
