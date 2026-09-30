@@ -138,13 +138,21 @@ strands the parts. There is a comment saying so at the call site; keep it.
 
 ### 7. The two xz libraries are deliberate.
 
-`io.go` imports `ulikunitz/xz` for writing and `xi2/xz` for reading. This is
-not a redundant dependency. `ulikunitz/xz`'s `lzma/breader.go` turns a legal
-`(0, nil)` read into a fatal `breader.ReadByte: no data`, and blazer's B2
-reader returns exactly that at every 10 MB download-chunk boundary — so
-reads fail once the *compressed* object exceeds ~10 MB. Reported upstream as
-ulikunitz/xz#79. See `todo/004-consolidate-xz-libraries.md` before touching
-it.
+`io.go` imports `ulikunitz/xz` for writing and `xi2/xz` for reading. Reading
+with `ulikunitz` instead drops a memory guard that no configuration restores.
+`xi2` caps the LZMA2 dictionary at 64 MiB and returns `ErrMemlimit`;
+`ulikunitz` allocates whatever the stream's block header declares, to a
+maximum of 4 GiB - 1. An 84-byte `.xz` allocates 1 GiB. `DictCap` does not cap
+it — `lzmafilter.go` raises it to the declared size. That exposure matters most
+for `HTTPBucket`, which reads whatever URL it is given.
+
+Reported as ulikunitz/xz#84. `v0.6.0-alpha.3` allocates by need rather than by
+declaration, so the exposure goes away there, but it panics at 2 GiB and above,
+unrecoverably under its default parallel reader. Re-measure when v0.6 lands
+rather than assuming either half still holds.
+
+The read bug that originally forced this split was fixed in v0.5.17; see
+`todo/004-consolidate-xz-libraries.md` before touching any of it.
 
 ## House style
 
