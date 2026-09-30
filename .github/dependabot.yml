@@ -1,0 +1,19 @@
+version: 2
+
+updates:
+  # The eight aws-sdk-go-v2 modules are released together and their versions
+  # are expected to move together, so they are grouped into one pull request
+  # rather than eight.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      aws-sdk-go-v2:
+        patterns:
+          - github.com/aws/aws-sdk-go-v2*
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
