@@ -1,58 +1,64 @@
 # 004 — Drop one of the two xz libraries
 
-**Status:** blocked upstream. Recommend leaving as-is.
+**Status:** no longer blocked upstream. It is now a trade-off, not a blocker,
+and the trade is currently against consolidating.
 
-## The situation
+## What forced the split
 
-`io.go` imports two xz implementations: `ulikunitz/xz` for writing and
-`xi2/xz` for reading. This looks like a redundant dependency. It is not.
+`io.go` imports `ulikunitz/xz` for writing and `xi2/xz` for reading.
+`ulikunitz`'s `lzma/breader.go` converted a legal `(0, nil)` read into a fatal
+`breader.ReadByte: no data`, and blazer's B2 reader returns `(0, nil)` once per
+10 MB `ChunkSize` — measured at offsets 10000000, 20000000 and EOF on a
+25,000,000-byte object, unchanged by `ConcurrentDownloads` or the caller's
+buffer size. The LZMA range decoder pulls every compressed byte through
+`breader`, so a compressed object spanning a boundary failed deterministically.
 
-## Root cause
+**Fixed upstream in v0.5.17** (2026-09-19, ulikunitz/xz#79).
 
-`ulikunitz/xz`'s `lzma/breader.go` does a single one-byte `Read` with no
-retry and converts a `(0, nil)` return into a fatal
-`breader.ReadByte: no data`:
+One subtlety worth keeping, because it invalidated a first attempt at a live
+test: **incompressible payloads do not reproduce it.** LZMA2 falls back to
+uncompressed chunks, which are read in bulk and never reach `breader`. A test
+using random data crossed 2.5 chunk boundaries and passed against the broken
+version. Any reproducer here needs compressible data — real payloads are JSON —
+and should assert the stall actually fired.
 
-```go
-n, err := r.Reader.Read(r.p)
-if n < 1 {
-    if err == nil {
-        err = errors.New("breader.ReadByte: no data")
-    }
-    return 0, err
-}
-```
+## What consolidating would now cost
 
-`io.Reader`'s contract explicitly tells callers to treat `(0, nil)` as
-"nothing happened" and retry. blazer's B2 reader returns exactly that at
-every download-chunk boundary (`ChunkSize` defaults to `1e7`), so reads fail
-once the **compressed** object exceeds ~10 MB:
+`xi2` caps the LZMA2 dictionary at 64 MiB and returns `ErrMemlimit`.
+`ulikunitz` allocates whatever the stream's block header declares. Measured on
+an 84-byte `.xz`, with `DictCap` explicitly set to 1 MiB in the third column:
 
-```
- 9.9 MB compressed → 0 chunk boundaries → OK
-11.5 MB compressed → 1 chunk boundary   → breader.ReadByte: no data
-```
+| declared dictionary | xi2 | ulikunitz default | ulikunitz DictCap=1MiB |
+|---|---|---|---|
+| as written (8 MiB) | 1 MiB | 8 MiB | 8 MiB |
+| 1 GiB | `ErrMemlimit`, 0 | 1024 MiB | 1024 MiB |
+| 4 GiB - 1 | `ErrMemlimit`, 0 | 4096 MiB | 4096 MiB |
 
-The size dependence is why it presents as intermittent — small test objects
-pass. `xi2/xz` reads into its own 8 KiB buffer and loops on `rn == 0`, so it
-is unaffected. Still present in `v0.5.16`.
+`xz.ReaderConfig{DictCap: N}` is a floor, not a ceiling — `lzmafilter.go` does
+`if dc > config.DictCap { config.DictCap = dc }`. So there is no configuration
+that restores the guard, and a caller cannot add one from outside the library:
+the dictionary size lives in *each* block header, so checking only the first is
+bypassed by a stream with a second block.
 
-Reported as [ulikunitz/xz#79](https://github.com/ulikunitz/xz/issues/79)
-(filed 2026-08-30). A patch exists that fixes the reproducer and keeps the
-full upstream suite green, but opening that PR was deliberately parked.
-Upstream cadence is sparse, so nothing here should wait on it.
+This matters most for `HTTPBucket`, which reads whatever URL it is given.
 
-## If it is ever consolidated anyway
+Reported as [ulikunitz/xz#84](https://github.com/ulikunitz/xz/issues/84).
 
-Two things are required, not one:
+## v0.6 removes the cost, and adds a different one
 
-1. Wrap the source in a reader that retries `(0, nil)`, bounded, returning
-   `io.ErrNoProgress` on a genuinely stalled source. `bufio` does **not**
-   work — it passes `(0, nil)` straight through.
-2. Set an explicit `xz.ReaderConfig{DictCap: N}`. `xi2` caps the LZMA2
-   dictionary at 64 MiB and returns `ErrMemlimit`; `ulikunitz` grows to
-   whatever the stream declares. Dropping `xi2` also drops that memory
-   guard against a hostile `.xz`.
+Measured on `v0.6.0-alpha.3`: allocation tracks the data rather than the
+declaration, so the same 84-byte streams allocate 0.03 MiB whatever they
+declare. The amplification is gone.
 
-Net: one fewer dependency, in exchange for a shim plus a `DictCap` someone
-has to remember. That trade is why this is not done.
+In its place, a declared size of 2 GiB or more panics with
+`lz: buffer is full`. The streams are valid — v0.5.17 decodes them and `xz`
+5.8.4 reads them — and under the default `Workers = GOMAXPROCS` the panic
+fires inside `mtrWork`'s goroutine, where the caller cannot recover it. Both
+halves are in #84.
+
+## Recommendation
+
+Keep both libraries while v0.5.x is current. Consolidating buys one fewer
+dependency and costs an uncappable allocation on any `.xz` this library did not
+write. Re-measure when v0.6 ships — the numbers above are version-specific and
+the trade flips if the panic is turned into an error.
