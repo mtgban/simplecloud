@@ -23,7 +23,7 @@ require (
 	github.com/dsnet/compress v0.0.1
 	github.com/ulikunitz/xz v0.5.17
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
-	google.golang.org/api v0.298.0
+	google.golang.org/api v0.299.0
 )
 
 require (
@@ -84,6 +84,6 @@ require (
 	google.golang.org/genproto v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
-	google.golang.org/grpc v1.83.2 // indirect
+	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
