@@ -65,8 +65,9 @@ jobs:
   # fetched at run time, so a pinned binary still sees new advisories. What the
   # pin avoids is a tool release changing what counts as reachable.
   #
-  # Standard-library advisories depend on the toolchain running the scan, so it
-  # runs on go.mod's version, the oldest one consumers can build with.
+  # Standard-library advisories depend on the toolchain running the scan. This
+  # one runs on go.mod's toolchain line, like the other jobs; consumers build
+  # with their own toolchain, so the standard library's patch level is theirs.
   vuln:
     runs-on: ubuntu-latest
     steps:

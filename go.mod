@@ -1,6 +1,8 @@
 module github.com/mtgban/simplecloud
 
-go 1.26.8
+go 1.26.0
+
+toolchain go1.26.8
 
 // v0.0.10 wrote b2://, gs:// and s3:// objects with the full URL as the
 // object key, because cleanPath only stripped the scheme for http(s) URLs.

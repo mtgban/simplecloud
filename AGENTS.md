@@ -202,3 +202,9 @@ in a >100 MB transfer against a real bucket.
   backwards to an older, worse version.
 - Not every change deserves a release. CI, lint config and verified
   behaviour-preserving changes ride along with the next real one.
+- **`go.mod`'s `go` line is the floor, not the version we prefer.** Every
+  consumer inherits it as a minimum, so raise it only as far as a dependency
+  or a language feature needs (`go mod tidy` enforces the former). The
+  `toolchain` line is what this repo builds, tests and scans with, and CI
+  reads it; consumers ignore it. The standard library's patch level belongs
+  to the applications that build binaries, so pin that there, not here.
