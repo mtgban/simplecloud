@@ -2,10 +2,13 @@ package simplecloud_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"iter"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -753,4 +756,152 @@ func TestList_LiveB2(t *testing.T) {
 			t.Fatalf("iterator produced %d objects after break, want 1", n)
 		}
 	})
+}
+
+// The listing fakes below each hold one object, listedKey, and refuse any
+// listing under refusedPrefix, so a backend's match, empty and refusal paths
+// all run offline.
+const (
+	listedKey     = "magic/a.json.xz"
+	listedSize    = 3
+	refusedPrefix = "refused/"
+	keylessPrefix = "keyless/" // S3 only: answered with an entry that has no key
+)
+
+var listedAt = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+// listingS3 fakes S3's ListObjectsV2 for one bucket.
+func listingS3(t *testing.T) *simplecloud.S3Bucket {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prefix := r.URL.Query().Get("prefix")
+		w.Header().Set("Content-Type", "application/xml")
+		switch {
+		case prefix == refusedPrefix:
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `<Error><Code>AccessDenied</Code><Message>refused</Message></Error>`)
+		case prefix == keylessPrefix:
+			io.WriteString(w, `<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Size>3</Size></Contents></ListBucketResult>`)
+		case strings.HasPrefix(listedKey, prefix):
+			io.WriteString(w, `<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>`+listedKey+
+				`</Key><Size>`+strconv.Itoa(listedSize)+`</Size><LastModified>`+listedAt.Format(time.RFC3339)+
+				`</LastModified></Contents></ListBucketResult>`)
+		default:
+			io.WriteString(w, `<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	bucket, err := simplecloud.NewS3Client(ctx, "id", "key", "bucket", srv.URL, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bucket
+}
+
+// listingGCS fakes GCS's objects.list, reached through STORAGE_EMULATOR_HOST
+// so no credentials are needed.
+func listingGCS(t *testing.T) *simplecloud.GCSBucket {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prefix := r.URL.Query().Get("prefix")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case prefix == refusedPrefix:
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"error": {"code": 403, "message": "refused"}}`)
+		case strings.HasPrefix(listedKey, prefix):
+			io.WriteString(w, `{"items": [{"name": "`+listedKey+`", "size": "`+strconv.Itoa(listedSize)+
+				`", "updated": "`+listedAt.Format(time.RFC3339)+`"}]}`)
+		default:
+			io.WriteString(w, `{}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("STORAGE_EMULATOR_HOST", strings.TrimPrefix(srv.URL, "http://"))
+	bucket, err := simplecloud.NewGCSClient(ctx, "", "bucket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bucket
+}
+
+// serveB2List answers b2_list_file_names for refusingB2. It omits
+// src_last_modified_millis, so List has to fall back to uploadTimestamp.
+func serveB2List(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Prefix string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	switch {
+	case req.Prefix == refusedPrefix:
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"status": 400, "code": "bad_request", "message": "refused"}`)
+	case strings.HasPrefix(listedKey, req.Prefix):
+		io.WriteString(w, `{"files": [{"fileId": "id", "fileName": "`+listedKey+`", "contentLength": `+
+			strconv.Itoa(listedSize)+`, "action": "upload", "uploadTimestamp": `+
+			strconv.FormatInt(listedAt.UnixMilli(), 10)+`}]}`)
+	default:
+		io.WriteString(w, `{"files": []}`)
+	}
+}
+
+// drain collects a listing up to its first error. Anything yielded after that
+// error is itself a failure: an error must end iteration.
+func drain(t *testing.T, l simplecloud.Lister, prefix string) ([]simplecloud.ObjectInfo, error) {
+	t.Helper()
+	var got []simplecloud.ObjectInfo
+	var first error
+	for obj, err := range l.List(ctx, prefix) {
+		switch {
+		case first != nil:
+			t.Errorf("List(%q) yielded %+v, %v after its error", prefix, obj, err)
+		case err != nil:
+			first = err
+		default:
+			got = append(got, obj)
+		}
+	}
+	return got, first
+}
+
+// TestList_CloudBackends runs each cloud backend's List against a fake of its
+// API: a match, an empty listing, and a refusal.
+func TestList_CloudBackends(t *testing.T) {
+	b2Bucket, _ := refusingB2(t)
+	backends := []struct {
+		name   string
+		lister simplecloud.Lister
+	}{
+		{"s3", listingS3(t)},
+		{"gcs", listingGCS(t)},
+		{"b2", b2Bucket},
+	}
+	for _, b := range backends {
+		t.Run(b.name, func(t *testing.T) {
+			got, err := drain(t, b.lister, "magic/")
+			if err != nil {
+				t.Fatalf("match: %v", err)
+			}
+			if len(got) != 1 || got[0].Key != listedKey || got[0].Size != listedSize || !got[0].LastModified.Equal(listedAt) {
+				t.Errorf("match: got %+v, want %s, %d bytes, modified %s", got, listedKey, listedSize, listedAt)
+			}
+
+			if got, err := drain(t, b.lister, "pokemon/"); err != nil || len(got) != 0 {
+				t.Errorf("empty: got %+v, %v; want nothing and no error", got, err)
+			}
+
+			if got, err := drain(t, b.lister, refusedPrefix); err == nil || len(got) != 0 {
+				t.Errorf("refused: got %+v, %v; want only an error", got, err)
+			}
+		})
+	}
+}
+
+// TestList_S3KeylessEntryIsAnError pins that an entry S3 returns without a key
+// is reported rather than skipped, which would shorten the listing silently.
+func TestList_S3KeylessEntryIsAnError(t *testing.T) {
+	if got, err := drain(t, listingS3(t), keylessPrefix); err == nil || len(got) != 0 {
+		t.Errorf("got %+v, %v; want only an error", got, err)
+	}
 }
