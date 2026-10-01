@@ -208,7 +208,7 @@ before the built-in schemes (so it can also override them); returning
 gcs, _ := simplecloud.NewGCSClient(ctx, "sa.json", "my-bucket") // closed by you
 r, err := simplecloud.Open(ctx, "gs://my-bucket/data/report.json.gz",
     simplecloud.WithResolver(func(_ context.Context, scheme, host string) (simplecloud.Reader, error) {
-        if scheme == "gs" {
+        if scheme == simplecloud.SchemeGCS {
             return gcs, nil
         }
         return nil, nil

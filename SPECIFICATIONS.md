@@ -242,14 +242,18 @@ lazy, so failures surface on first `Read`, `Write` or `Close`.
 `Open(ctx, path, opts...)` picks a backend from the URL scheme and delegates
 to `InitReader`.
 
-| Scheme | Backend | Required options |
-|---|---|---|
-| *(none)* | local filesystem | — |
-| `http`, `https` | HTTP(S), base = scheme + host | `WithHTTPClient` (optional) |
-| `b2` | Backblaze B2, host = bucket | `WithB2Credentials` |
-| `s3` | S3 / compatible, host = bucket | `WithS3Credentials`, `WithS3Endpoint`, `WithS3Region` |
-| `gs` | GCS, host = bucket | `WithGCSServiceAccount` |
-| anything else | error, unless a resolver handles it | `WithResolver` |
+| Scheme | Constant | Backend | Required options |
+|---|---|---|---|
+| *(none)* | `SchemeFile` | local filesystem | — |
+| `http`, `https` | `SchemeHTTP`, `SchemeHTTPS` | HTTP(S), base = scheme + host | `WithHTTPClient` (optional) |
+| `b2` | `SchemeB2` | Backblaze B2, host = bucket | `WithB2Credentials` |
+| `s3` | `SchemeS3` | S3 / compatible, host = bucket | `WithS3Credentials`, `WithS3Endpoint`, `WithS3Region` |
+| `gs` | `SchemeGCS` | GCS, host = bucket | `WithGCSServiceAccount` |
+| anything else | — | error, unless a resolver handles it | `WithResolver` |
+
+A resolver receives the scheme spelled exactly as the constant. They are
+untyped strings, so `BucketResolver` keeps its `string` parameter and existing
+resolvers compile unchanged.
 
 Scheme and host come from `url.Parse`. A path with no host — a local file,
 or a `scheme:opaque` form such as `report:v2/file.gz` — or one `url.Parse`

@@ -8,9 +8,29 @@ import (
 	"net/url"
 )
 
+// The schemes Open handles natively, spelled as a BucketResolver receives
+// them. Comparing against these rather than string literals turns a misspelt
+// scheme into a compile error instead of a silent fall-through to the
+// built-ins.
+const (
+	// SchemeFile is the empty scheme a resolver sees for a path Open treats as
+	// local; see Open for which paths those are.
+	SchemeFile = ""
+	// SchemeHTTP selects HTTPBucket, as does SchemeHTTPS.
+	SchemeHTTP  = "http"
+	SchemeHTTPS = "https"
+	// SchemeB2 selects Backblaze B2; the host is the bucket.
+	SchemeB2 = "b2"
+	// SchemeS3 selects S3 or an S3-compatible store; the host is the bucket.
+	SchemeS3 = "s3"
+	// SchemeGCS selects Google Cloud Storage; the host is the bucket.
+	SchemeGCS = "gs"
+)
+
 // BucketResolver constructs the backend for a URL's scheme and host (the host
 // is the URL authority, typically the bucket name). Returning a non-nil Reader
 // selects it; returning (nil, nil) falls through to Open's built-in schemes.
+// For those, scheme is one of the Scheme constants.
 //
 // A resolver is the extension point for schemes Open does not handle natively,
 // and for taking control of client lifecycle — e.g. returning a shared GCSBucket
@@ -159,9 +179,9 @@ func (o *openOptions) bucketFor(ctx context.Context, u *url.URL, path string) (R
 	}
 
 	switch scheme {
-	case "":
+	case SchemeFile:
 		return &FileBucket{}, nil
-	case "http", "https":
+	case SchemeHTTP, SchemeHTTPS:
 		client := o.httpClient
 		if client == nil {
 			client = http.DefaultClient
@@ -170,16 +190,16 @@ func (o *openOptions) bucketFor(ctx context.Context, u *url.URL, path string) (R
 		// passes the object path, which HTTPBucket joins onto it.
 		base := &url.URL{Scheme: u.Scheme, Host: u.Host, User: u.User}
 		return &HTTPBucket{Client: client, URL: base}, nil
-	case "b2":
+	case SchemeB2:
 		client, err := NewB2Client(ctx, o.b2KeyID, o.b2AppKey, host)
 		if err != nil {
 			return nil, err
 		}
 		client.ConcurrentDownloads = o.concurrentDownloads
 		return client, nil
-	case "s3":
+	case SchemeS3:
 		return NewS3Client(ctx, o.s3AccessKey, o.s3SecretKey, host, o.s3Endpoint, o.s3Region)
-	case "gs":
+	case SchemeGCS:
 		return NewGCSClient(ctx, o.gcsServiceAccount, host)
 	default:
 		return nil, fmt.Errorf("simplecloud: unsupported scheme %q in %q", scheme, path)
