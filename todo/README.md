@@ -10,11 +10,11 @@ Ordered roughly by value, not by number.
 
 | # | Item | Status |
 |---|---|---|
+| [008](008-verify-s3-gcs-abort.md) | Verify S3/GCS abort | Ready offline; live needs credentials |
 | [001](001-compression-enum.md) | Single-source the compression table | Ready; no API impact |
 | [002](002-scheme-constants.md) | Export scheme constants for resolvers | Ready; non-breaking if additive |
 | [005](005-write-side-open.md) | Write-side counterpart to `Open` | Ready; API addition |
 | [006](006-compression-levels.md) | Configurable compression levels | Ready; API addition |
-| [008](008-verify-s3-gcs-abort.md) | Verify S3/GCS abort against live buckets | Blocked: no credentials |
 | [003](003-s3-transfermanager.md) | Migrate off deprecated `manager.Uploader` | Blocked: replacement is pre-1.0 |
 | [004](004-consolidate-xz-libraries.md) | Drop one of the two xz libraries | Unblocked; trade-off says no |
 | [013](013-drop-b2writer.md) | Drop `b2Writer` once blazer fixes #54 | Blocked: upstream bug |
