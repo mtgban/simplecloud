@@ -17,18 +17,22 @@ improvements that are deliberately not done yet, each with the reasoning.
 
 ## The gate
 
-Every change must pass all five, and CI enforces them:
+Every change must pass all of these, and CI enforces them:
 
 ```sh
 gofmt -s -l .                 # must print nothing
 go vet ./...
 go run github.com/mgechev/revive@v1.13.0 -set_exit_status -config .revive.toml ./...
-go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+go build ./...
 go test -race ./...
 ```
 
 Both linters are pinned on purpose: an unpinned release finding new things
-would fail a build that changed nothing.
+would fail a build that changed nothing. govulncheck is not: its verdict
+follows the vulnerability database. No `reflect`: compare with `slices`/`maps`
+or a comparison written for the type.
 
 **Run them under the `go.mod` toolchain, not a newer local Go.** staticcheck
 understands the compiler's export data only up to the Go release it was
@@ -43,7 +47,7 @@ which looks like a broken tree and is not. CI is unaffected because
 `setup-go` reads `go-version-file: go.mod`. Locally, match it:
 
 ```sh
-GOTOOLCHAIN=go1.26.8 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+GOTOOLCHAIN=go1.26.8 go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
 ```
 
 Observed with local Go 1.27.1 against staticcheck 2025.1.1; an older

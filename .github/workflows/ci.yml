@@ -42,7 +42,7 @@ jobs:
       # it. Pinned, since a new release finding new things would fail a build
       # that changed nothing.
       - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
 
   test:
     runs-on: ubuntu-latest
@@ -54,6 +54,9 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: build
+        run: go build ./...
+
       - name: test
         run: go test -race ./...
 
@@ -61,9 +64,8 @@ jobs:
   # and reports only advisories the code actually reaches, so an unreachable
   # one in a transitive module does not fail the build.
   #
-  # Pinned like the linters above, but for a different reason: the database is
-  # fetched at run time, so a pinned binary still sees new advisories. What the
-  # pin avoids is a tool release changing what counts as reachable.
+  # Not pinned, unlike the linters above: the verdict follows the
+  # vulnerability database.
   #
   # Standard-library advisories depend on the toolchain running the scan. This
   # one runs on go.mod's toolchain line, like the other jobs; consumers build
@@ -79,4 +81,4 @@ jobs:
           check-latest: true
 
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
