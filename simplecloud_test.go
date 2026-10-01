@@ -414,8 +414,8 @@ func TestHTTPBucket_NilClient(t *testing.T) {
 
 // refusingB2 fakes just enough of the B2 HTTP API for blazer to open a bucket
 // and start an upload, small or large, then refuses the upload itself. It also
-// returns a count of the requests that reach /upload. opts go to blazer's
-// client.
+// returns a count of the requests that reach /upload, and answers listings
+// through serveB2List. opts go to blazer's client.
 func refusingB2(t *testing.T, opts ...b2.ClientOption) (*simplecloud.B2Bucket, *atomic.Int32) {
 	t.Helper()
 	uploads := new(atomic.Int32)
@@ -434,6 +434,8 @@ func refusingB2(t *testing.T, opts ...b2.ClientOption) (*simplecloud.B2Bucket, *
 		case "/b2api/v3/b2_start_large_file":
 			w.WriteHeader(http.StatusBadRequest)
 			io.WriteString(w, `{"status": 400, "code": "bad_request", "message": "refused"}`)
+		case "/b2api/v3/b2_list_file_names":
+			serveB2List(w, r)
 		default:
 			http.NotFound(w, r)
 		}
