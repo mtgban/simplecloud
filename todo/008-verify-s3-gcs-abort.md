@@ -1,6 +1,7 @@
 # 008 — Verify the S3 and GCS abort paths against live buckets
 
-**Status:** blocked on credentials. Highest-value open verification.
+**Status:** ready offline; live verification still needs credentials.
+Highest-value open verification.
 
 ## Why this matters more than it sounds
 
@@ -21,6 +22,21 @@ behind — billable, and invisible in a normal object listing — because it
 only issues `b2_cancel_large_file` when given `WithCancelOnError`.
 
 S3 and GCS are currently in exactly the state B2 was in before that test.
+
+## Offline, without credentials
+
+Credentials are not needed to get the S3 and GCS rows off "source reading
+only". `listingS3` and `listingGCS` in `list_test.go` already reach both SDKs
+through `httptest`, and the same route reaches the write path. A proof of
+concept on the `s3-gcs-abort-poc` branch drives a failing 12 MiB `Copy` into
+an S3 fake and observes `CreateMultipartUpload`, six `UploadPart`s and
+`AbortMultipartUpload`, with no `CompleteMultipartUpload`.
+
+What it cannot show is what a real service does with those requests: the
+fake answers the way this package expects. That is the gap the B2 leak fell
+through, so the live run below is still worth doing once credentials exist.
+Before landing the proof of concept, tune retries and sizes — its GCS case
+takes 32s, because the SDK retries the fake's 500s.
 
 ## What to run, given credentials
 
@@ -43,4 +59,5 @@ is a wrong error or a hang, not a billable leak.
 
 `manager.Uploader` issues `AbortMultipartUpload` on the same context passed
 to `Upload`, which is why `s3PipeWriter.Abort`'s ordering is load-bearing.
-That ordering is exactly what a live test would confirm or refute.
+That ordering is what the offline route observes, and what a live test
+would confirm against a real service.

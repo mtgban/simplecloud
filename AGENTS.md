@@ -183,7 +183,9 @@ semantics: `Close` records `committed`, `Abort` records `aborted`, and
 `failWrites` makes a compressor fail to initialise. Prefer extending it over
 writing a new fake. Behaviour inside blazer, which `commitBucket` replaces
 and so cannot reach, is faked one level down by `refusingB2`, an `httptest`
-fake of the B2 HTTP API: extend that one instead.
+fake of the B2 HTTP API: extend that one instead. S3 and GCS are faked at the
+same level by `listingS3` and `listingGCS`, reached through `NewS3Client`'s
+endpoint and `STORAGE_EMULATOR_HOST`; extend those rather than adding more.
 
 Be aware that mocks were **not** sufficient historically: the B2 large-file
 leak passed every mock test and the small-file live test, and only appeared

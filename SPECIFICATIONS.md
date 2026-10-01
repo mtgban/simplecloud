@@ -220,8 +220,8 @@ offline tests. The B2 path is verified against a live bucket, including a
 150 MiB transfer that crosses blazer's 100 MB large-file threshold.
 Offline, `TestB2Bucket_FailedUploadReturnsError` runs blazer's writer
 against a fake of the B2 HTTP API and pins that an aborted small upload
-sends nothing. The S3 and GCS paths are verified by source reading only — no credentials were
-available. See `todo/008`.
+sends nothing. The S3 and GCS paths are verified by source reading only;
+`todo/008` describes an offline route that needs no credentials.
 
 **GCS residue:** incomplete resumable uploads never appear in the bucket and
 do not count toward storage; the session expires after one week. So an
@@ -357,8 +357,16 @@ across backends.
 
 The offline tests cover the iterator contract — prefix filtering,
 leading-slash normalisation, early termination, and error-as-final-pair —
-but they exercise a **fake** `Lister`, so they pin what a caller may rely on,
-not what any backend actually does.
+against a **fake** `Lister`, so they pin what a caller may rely on, not what
+any backend actually does.
+
+Each cloud backend's own `List` also runs offline, in
+`TestList_CloudBackends`, against an `httptest` fake of its API: S3 through
+`NewS3Client`'s endpoint, GCS through `STORAGE_EMULATOR_HOST`, B2 through
+`refusingB2`. Each lists a match, an empty result and a refusal, and
+`TestList_S3KeylessEntryIsAnError` covers an S3 entry with no key. The fakes answer the way this package reads each API,
+so they prove the code handles those responses, not that the real service
+sends them. None of them returns a second page.
 
 The **B2** implementation is additionally verified against a live bucket by
 `TestList_LiveB2`, which skips unless credentials are set. It asserts, as
@@ -380,11 +388,11 @@ B2_APPLICATION_KEY_ID_DATASTORE=... B2_APPLICATION_KEY_DATASTORE=... \
   SIMPLECLOUD_TEST_B2_BUCKET=my-bucket go test -run TestList_LiveB2 -v
 ```
 
-The **S3** and **GCS** implementations are verified by construction and the
-compile-time assertions only; no credentials were available. Their
-paginators are the standard ones (`ListObjectsV2Paginator`,
-`ObjectIterator`), but see `todo/008` — this package has been misled by
-source reading before.
+**S3** and **GCS** have not been listed against a live bucket; no
+credentials were available. Pagination is untested on both, live or
+offline. Their paginators are the standard ones (`ListObjectsV2Paginator`,
+`ObjectIterator`), but this package has been misled by source reading
+before — see `todo/008`.
 
 ### 10.4 Local filesystem
 

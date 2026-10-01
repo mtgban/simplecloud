@@ -19,16 +19,17 @@ AGENTS.md §6.
 
 ## Why it is blocked
 
-1. **The replacement is pre-1.0** — `v0.4.3` at time of writing. Pointing a
+1. **The replacement is pre-1.0** — still `v0.4.12` as of 2026-10-01. Pointing a
    published library's dependency from a stable `v1.22.x` module at a `v0.x`
    one with no API-stability guarantee is a real cost for consumers.
-2. **It cannot be verified here.** `Abort` currently depends on
+2. **Its abort must be re-verified.** `Abort` currently depends on
    `manager.Uploader` calling `AbortMultipartUpload` with
-   `LeavePartsOnError` defaulting false. Any migration must re-verify the
-   abort against a live bucket — and B2 is precisely where reading the
-   source alone gave the wrong answer (see 008).
+   `LeavePartsOnError` defaulting false. The offline route in 008 can now
+   check that without credentials; a live bucket is still the stronger
+   check, since B2 is precisely where reading the source alone gave the
+   wrong answer.
 
 ## Recommendation
 
-Revisit when `transfermanager` reaches v1, or sooner if S3-compatible
-credentials (R2, MinIO) become available to test against.
+Revisit when `transfermanager` reaches v1. Land 008's offline abort test
+first, so the migration has something to fail against.
