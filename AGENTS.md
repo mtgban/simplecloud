@@ -196,8 +196,8 @@ in a >100 MB transfer against a real bucket.
 - Work in a git worktree, never a shared checkout.
 - Every PR branches off `master`. **Never stack PRs.**
 - Never push to `master` without being asked for that specific push.
-- Tags are `v0.0.N`. The Go module proxy is immutable: a bad release can
-  only be **retracted**, and the `retract` directive must live in a *later*
+- The Go module proxy is immutable: a bad release can only be
+  **retracted**, and the `retract` directive must live in a *later*
   version's `go.mod`, released at the same time, or consumers resolve
   backwards to an older, worse version.
 - Not every change deserves a release. CI, lint config and verified
