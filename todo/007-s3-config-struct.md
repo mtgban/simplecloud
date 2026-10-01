@@ -25,7 +25,7 @@ measured against this exact shape:
 Callers here pass literals and values read from env vars, which is exactly
 the case named types do not protect. They would add friction everywhere and
 catch almost nothing. This is why the wider "use real types everywhere"
-idea was narrowed to 001 and 002.
+idea was narrowed to 001 and to the untyped `Scheme` constants in `open.go`.
 
 ## What would fix it
 

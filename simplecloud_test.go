@@ -156,6 +156,38 @@ func TestOpen_ResolverHandlesCustomScheme(t *testing.T) {
 	}
 }
 
+// TestOpen_ResolverSeesSchemeConstants pins each Scheme constant to what Open
+// actually hands a resolver for a path spelled the way callers spell it. The
+// resolver always answers, so no built-in backend is constructed.
+func TestOpen_ResolverSeesSchemeConstants(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"dir/x.txt", simplecloud.SchemeFile},
+		{"http://host/x.txt", simplecloud.SchemeHTTP},
+		{"https://host/x.txt", simplecloud.SchemeHTTPS},
+		{"b2://bucket/x.txt", simplecloud.SchemeB2},
+		{"s3://bucket/x.txt", simplecloud.SchemeS3},
+		{"gs://bucket/x.txt", simplecloud.SchemeGCS},
+	}
+	for _, tt := range tests {
+		var got string
+		resolver := func(_ context.Context, scheme, _ string) (simplecloud.Reader, error) {
+			got = scheme
+			return &stringBucket{content: "ok"}, nil
+		}
+		r, err := simplecloud.Open(ctx, tt.path, simplecloud.WithResolver(resolver))
+		if err != nil {
+			t.Fatalf("Open(%q): %v", tt.path, err)
+		}
+		r.Close()
+		if got != tt.want {
+			t.Errorf("Open(%q) gave the resolver scheme %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestOpen_ResolverFallsThroughToBuiltin(t *testing.T) {
 	// A resolver that declines (nil, nil) must let the built-in schemes handle
 	// the path.
