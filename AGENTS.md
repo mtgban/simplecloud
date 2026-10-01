@@ -43,7 +43,7 @@ which looks like a broken tree and is not. CI is unaffected because
 `setup-go` reads `go-version-file: go.mod`. Locally, match it:
 
 ```sh
-GOTOOLCHAIN=go1.25.0 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+GOTOOLCHAIN=go1.26.8 go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
 ```
 
 Observed with local Go 1.27.1 against staticcheck 2025.1.1; an older
