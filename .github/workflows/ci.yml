@@ -9,9 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  # Formatting, vet and lint read nothing the tests need and are independent
-  # of the Go version under test, so they run once on their own rather than
-  # repeating across the matrix below.
+  # Formatting, vet and lint read nothing the tests need, so they run as their
+  # own job, in parallel with the tests.
   style:
     runs-on: ubuntu-latest
     steps:
@@ -47,15 +46,12 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.26', 'stable']
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version-file: go.mod
           check-latest: true
 
       - name: test
