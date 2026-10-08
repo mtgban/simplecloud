@@ -2,7 +2,7 @@ module github.com/mtgban/simplecloud
 
 go 1.26.0
 
-toolchain go1.26.8
+toolchain go1.26.9
 
 // v0.0.10 wrote b2://, gs:// and s3:// objects with the full URL as the
 // object key, because cleanPath only stripped the scheme for http(s) URLs.
@@ -77,7 +77,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
