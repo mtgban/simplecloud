@@ -1,8 +1,6 @@
 module github.com/mtgban/simplecloud
 
-go 1.26.0
-
-toolchain go1.26.10
+go 1.26.10
 
 // v0.0.10 wrote b2://, gs:// and s3:// objects with the full URL as the
 // object key, because cleanPath only stripped the scheme for http(s) URLs.
@@ -16,7 +14,7 @@ retract v0.0.12
 
 require (
 	cloud.google.com/go/storage v1.69.0
-	github.com/Backblaze/blazer v0.8.0
+	github.com/Backblaze/blazer v0.9.0
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.6
