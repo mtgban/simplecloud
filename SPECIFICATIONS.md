@@ -173,7 +173,16 @@ Selected by suffix on the cleaned key, for both directions:
 | `.bz2` | bzip2 | `compress/bzip2` | `dsnet/compress/bzip2` |
 | `.xz` | xz / LZMA2 | `xi2/xz` | `ulikunitz/xz` |
 
-Any other suffix passes through uncompressed. Compression levels are not
+Any other suffix passes through uncompressed.
+
+An `.xz` is decoded ahead of its reader, in a goroutine of its own
+(`xz.go`). Where a stream's block headers record their sizes, as
+multi-threaded `xz` writes them, up to five blocks decode at once, each
+through xi2 as a stream of one block; the stream's index and footer are
+checked against the blocks read. A stream whose first block header records
+no sizes goes to xi2 whole. A stream with sizes in its first block header
+and not in a later one is refused; xz-utils writes them in every header or
+none. Compression levels are not
 configurable; codec defaults apply.
 
 The two different xz libraries are deliberate — see AGENTS.md §7 and

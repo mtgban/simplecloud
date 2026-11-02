@@ -11,7 +11,6 @@ import (
 
 	bzip2Writer "github.com/dsnet/compress/bzip2"
 	"github.com/ulikunitz/xz"
-	xzReader "github.com/xi2/xz"
 )
 
 // cleanPath reduces a path to the object key used for storage access and
@@ -95,12 +94,12 @@ func InitReader(ctx context.Context, bucket Reader, path string) (io.ReadCloser,
 
 	var decoder io.ReadCloser
 	if strings.HasSuffix(key, ".xz") {
-		xzReader, err := xzReader.NewReader(reader, 0)
+		xzReader, err := newXZReader(reader)
 		if err != nil {
 			reader.Close()
 			return nil, fmt.Errorf("simplecloud: init xz decoder for %q: %w", key, err)
 		}
-		decoder = io.NopCloser(xzReader)
+		decoder = xzReader
 	} else if strings.HasSuffix(key, ".bz2") {
 		bz2Reader := bzip2.NewReader(reader)
 		decoder = io.NopCloser(bz2Reader)

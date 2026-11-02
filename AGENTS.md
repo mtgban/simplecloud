@@ -142,13 +142,20 @@ strands the parts. There is a comment saying so at the call site; keep it.
 
 ### 7. The two xz libraries are deliberate.
 
-`io.go` imports `ulikunitz/xz` for writing and `xi2/xz` for reading. Reading
-with `ulikunitz` instead drops a memory guard that no configuration restores.
+`io.go` imports `ulikunitz/xz` for writing, and `xz.go` decodes with `xi2/xz`
+for reading. Reading with `ulikunitz` instead drops a memory guard that no
+configuration restores, and it reads its source a byte at a time: without a
+`bufio.Reader` in front, the Magic datastore takes 49 s against xi2's 8.3 s.
 `xi2` caps the LZMA2 dictionary at 64 MiB and returns `ErrMemlimit`;
 `ulikunitz` allocates whatever the stream's block header declares, to a
 maximum of 4 GiB - 1. An 84-byte `.xz` allocates 1 GiB. `DictCap` does not cap
 it — `lzmafilter.go` raises it to the declared size. That exposure matters most
 for `HTTPBucket`, which reads whatever URL it is given.
+
+`xz.go` decodes up to five blocks at once, each through its own xi2 decoder,
+so the cap holds per block in flight: 320 MiB of dictionaries at most, from a
+file of five blocks that each declare 64 MiB. Its output buffers are sized
+from what a block holds, not from the size its header declares.
 
 Reported as ulikunitz/xz#84. `v0.6.0-alpha.3` allocates by need rather than by
 declaration, so the exposure goes away there, but it panics at 2 GiB and above,
