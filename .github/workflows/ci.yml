@@ -42,7 +42,7 @@ jobs:
       # it. Pinned, since a new release finding new things would fail a build
       # that changed nothing.
       - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
 
   test:
     runs-on: ubuntu-latest
