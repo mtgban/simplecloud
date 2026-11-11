@@ -20,8 +20,8 @@ cloud.google.com/go/storage v1.70.0 h1:LQNHn0rRF94jVFfF3e416IzdQqIufa5GfF6HilQxb
 cloud.google.com/go/storage v1.70.0/go.mod h1:W84cNa070TZIegvTW67CBY+f5rxux8EJMb7YyiHdrls=
 cloud.google.com/go/trace v1.16.0 h1:GmQovzFc5F0CNfl0VLgL64aoTtu7xsM0YajW2GlG9+E=
 cloud.google.com/go/trace v1.16.0/go.mod h1:r+bdAn16dKLSV1G2D5v3e58IlQlizfxWrUfjx7kM7X0=
-github.com/Backblaze/blazer v0.8.0 h1:Nzkw1fjtjuKc04q1EKkRiFQt1F8uEWT9h9AaHLFL6TE=
-github.com/Backblaze/blazer v0.8.0/go.mod h1:T4y3EYa9IQ5J0PKc/C/J8/CEnSd3qa/lgNw938wZg10=
+github.com/Backblaze/blazer v0.9.0 h1:413rZHO8Vnpfjygrfxt8AO56LD6lE4w334MZIpnxdAs=
+github.com/Backblaze/blazer v0.9.0/go.mod h1:/JlJELHVlJWBwHknmVqQ92zYyVm0s4EI+Cn3XU6IgCc=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.38.0 h1:rmzbFS2CkHq0y2L5LkMVWm+QXjjNEXxjmhrJqga/QGk=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.38.0/go.mod h1:iIyrdhveU5Ow84ipRlxtjCOQnIM0DiqSMxuxm50xwZY=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.62.0 h1:5y2LR2pripbccOte6BpZ+guv5O5W0OQIfKvUYZrGaAQ=
