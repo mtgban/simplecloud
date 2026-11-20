@@ -16,7 +16,7 @@ retract v0.0.12
 
 require (
 	cloud.google.com/go/storage v1.70.0
-	github.com/Backblaze/blazer v0.9.0
+	github.com/Backblaze/blazer v0.10.1
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/config v1.33.13
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
