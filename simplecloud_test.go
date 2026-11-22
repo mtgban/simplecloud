@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/Backblaze/blazer/b2"
 	"github.com/mtgban/simplecloud"
@@ -491,7 +490,7 @@ func refusingB2(t *testing.T, opts ...b2.ClientOption) (*simplecloud.B2Bucket, *
 var tinyChunks = b2.DefaultWriterOptions(func(w *b2.Writer) { w.ChunkSize = 8 })
 
 // panickyTransport panics with itself on a request to the path it names,
-// standing in for a failure inside blazer that, unlike #54, records no error.
+// standing in for a failure inside blazer that records no error.
 type panickyTransport string
 
 func (p panickyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -512,8 +511,9 @@ func panicValue(f func()) (r any) {
 
 // TestB2Bucket_FailedUploadReturnsError runs failed uploads through blazer's
 // own writer, against a fake of the B2 HTTP API. Extending commitBucket would
-// not reach the bug, which is inside blazer: with WithCancelOnError it cancels
-// a large file that was never started, and panics (Backblaze/blazer#54).
+// not reach what it pins, which is inside blazer: with WithCancelOnError, a
+// failure before any large file was started must return its error, not cancel
+// a nil file and panic (Backblaze/blazer#54, handled from blazer v0.9.0).
 func TestB2Bucket_FailedUploadReturnsError(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -551,9 +551,9 @@ func TestB2Bucket_FailedUploadReturnsError(t *testing.T) {
 	}
 }
 
-// TestB2Bucket_UnrecordedPanicIsRaised pins the other side: a panic that
-// blazer recorded no error for comes back with its own value rather than as a
-// result, through a caller's deferred Close too.
+// TestB2Bucket_UnrecordedPanicIsRaised pins the other side: a panic inside
+// blazer comes back with its own value rather than as a result, and a caller's
+// deferred Close does not replace it with a panic of its own.
 func TestB2Bucket_UnrecordedPanicIsRaised(t *testing.T) {
 	t.Run("close", func(t *testing.T) {
 		transport := panickyTransport("/upload")
@@ -571,11 +571,6 @@ func TestB2Bucket_UnrecordedPanicIsRaised(t *testing.T) {
 	t.Run("write", func(t *testing.T) {
 		transport := panickyTransport("/b2api/v3/b2_start_large_file")
 		bucket, _ := refusingB2(t, b2.Transport(transport), tinyChunks)
-
-		// A Write retried with no error recorded blocks until its context
-		// ends, so a deadline turns that regression into a failure, not a hang.
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
 		w, err := simplecloud.InitWriter(ctx, bucket, "dst.txt")
 		if err != nil {
 			t.Fatal(err)
@@ -584,9 +579,6 @@ func TestB2Bucket_UnrecordedPanicIsRaised(t *testing.T) {
 			defer w.Close()
 			io.WriteString(w, "large payload")
 		})
-		if ctx.Err() != nil {
-			t.Fatalf("Write blocked until its context ended, then panicked with %v", r)
-		}
 		if r != transport {
 			t.Fatalf("Write panicked with %v, want %q", r, transport)
 		}
