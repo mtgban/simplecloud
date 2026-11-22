@@ -487,7 +487,7 @@ func refusingB2(t *testing.T, opts ...b2.ClientOption) (*simplecloud.B2Bucket, *
 
 // tinyChunks lowers blazer's large-file threshold to 8 bytes, so that a short
 // payload starts a large file.
-var tinyChunks = b2.DefaultWriterOptions(func(w *b2.Writer) { w.ChunkSize = 8 })
+var tinyChunks = b2.DefaultWriterOptions(b2.WriterOptionFunc(func(w *b2.Writer) { w.ChunkSize = 8 }))
 
 // panickyTransport panics with itself on a request to the path it names,
 // standing in for a failure inside blazer that records no error.
