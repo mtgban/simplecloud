@@ -211,7 +211,7 @@ the closer list.
 |---|---|
 | Local | close the file and `os.Remove` it — `NewWriter` already truncated any previous contents, so leaving it would be truncated data that reads as valid |
 | S3 | `pw.CloseWithError` fails the uploader's read so it aborts instead of completing from a clean EOF, then the context is cancelled — **in that order** |
-| B2 | cancel the write context; the writer is built with `b2.WithCancelOnError` so `b2_cancel_large_file` is actually issued, using a `context.WithoutCancel` context that outlives the cancelled one |
+| B2 | cancel the write context; the writer is built with `b2.WithCancelOnError` so `b2_cancel_large_file` is actually issued, using a `context.WithoutCancel` context that outlives the cancelled one, with a one-minute deadline because `Close` waits for that request |
 | GCS | cancel the write context, which is what Google's docs prescribe (`CloseWithError` is deprecated) |
 
 **Verification status.** The local and compressed paths are covered by

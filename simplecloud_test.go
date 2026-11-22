@@ -551,6 +551,57 @@ func TestB2Bucket_FailedUploadReturnsError(t *testing.T) {
 	}
 }
 
+// largeFileTransport lets blazer start a large file against refusingB2, whose
+// /upload then refuses the part, and answers b2_cancel_large_file itself,
+// recording whether that request carried a deadline.
+type largeFileTransport struct {
+	cancelled, hadDeadline atomic.Bool
+}
+
+func (l *largeFileTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	body := ""
+	switch r.URL.Path {
+	case "/b2api/v4/b2_start_large_file":
+		body = `{"fileId": "file", "fileName": "dst.txt"}`
+	case "/b2api/v4/b2_get_upload_part_url":
+		body = `{"uploadUrl": "http://` + r.Host + `/upload", "authorizationToken": "token"}`
+	case "/b2api/v4/b2_cancel_large_file":
+		_, ok := r.Context().Deadline()
+		l.hadDeadline.Store(ok)
+		l.cancelled.Store(true)
+		body = `{"fileId": "file"}`
+	default:
+		return http.DefaultTransport.RoundTrip(r)
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    r,
+	}, nil
+}
+
+// TestB2Bucket_CancelLargeFileHasDeadline pins that the b2_cancel_large_file
+// request for a failed large upload carries a deadline. blazer's Close waits
+// for that request, so without one a B2 that never answers hangs Close.
+func TestB2Bucket_CancelLargeFileHasDeadline(t *testing.T) {
+	transport := &largeFileTransport{}
+	bucket, uploads := refusingB2(t, b2.Transport(transport), tinyChunks)
+	_, err := simplecloud.Copy(ctx, &stringBucket{content: "large payload"}, bucket, "src.txt", "dst.txt")
+	if err == nil || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("Copy error = %v, want one containing %q", err, "refused")
+	}
+	if uploads.Load() == 0 {
+		t.Fatal("no part reached B2; the large file never started")
+	}
+	if !transport.cancelled.Load() {
+		t.Fatal("b2_cancel_large_file was not called")
+	}
+	if !transport.hadDeadline.Load() {
+		t.Error("b2_cancel_large_file context has no deadline")
+	}
+}
+
 // TestB2Bucket_UnrecordedPanicIsRaised pins the other side: a panic inside
 // blazer comes back with its own value rather than as a result, and a caller's
 // deferred Close does not replace it with a panic of its own.

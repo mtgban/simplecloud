@@ -6,9 +6,15 @@ import (
 	"io"
 	"iter"
 	"strings"
+	"time"
 
 	"github.com/Backblaze/blazer/b2"
 )
+
+// b2CancelTimeout bounds the b2_cancel_large_file request for a failed large
+// upload, which blazer's Close waits on. It covers blazer's retries of a single
+// small request, not a transfer.
+const b2CancelTimeout = time.Minute
 
 // B2Bucket implements Reader and Writer for a Backblaze B2 bucket.
 type B2Bucket struct {
@@ -62,11 +68,21 @@ func (b *B2Bucket) NewWriter(ctx context.Context, path string) (io.WriteCloser, 
 	// blazer only calls b2_cancel_large_file when given WithCancelOnError;
 	// without it a failed multipart upload silently leaves an unfinished large
 	// file behind, whose parts keep consuming storage. The cancel request needs
-	// a context that outlives the one being cancelled, hence WithoutCancel.
+	// a context that outlives the one being cancelled, hence WithoutCancel, and
+	// a deadline, because Close waits for it. blazer calls cancelCtx and then
+	// release once each, in turn, so release frees the timer.
+	var stop context.CancelFunc
 	cancelCtx := func() context.Context {
-		return context.WithoutCancel(ctx)
+		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), b2CancelTimeout)
+		stop = cancel
+		return c
 	}
-	w := b.Bucket.Object(dst).NewWriter(writeCtx, b2.WithCancelOnError(cancelCtx, nil))
+	release := func(error) {
+		if stop != nil {
+			stop()
+		}
+	}
+	w := b.Bucket.Object(dst).NewWriter(writeCtx, b2.WithCancelOnError(cancelCtx, release))
 	return &cancelWriter{WriteCloser: w, cancel: cancel}, nil
 }
 

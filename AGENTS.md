@@ -119,7 +119,10 @@ Cancelling the write context alone is **not** enough. blazer only issues
 `b2.WithCancelOnError`; otherwise `setErr` returns early on a nil `w.ctxf`
 and the unfinished large file is left behind, billable
 and invisible in a normal object listing. The cancel request also needs a
-context that outlives the cancelled one, hence `context.WithoutCancel`.
+context that outlives the cancelled one, hence `context.WithoutCancel`, and
+a deadline (`b2CancelTimeout`): from blazer v0.10.0 `Close` waits for the
+cancel request, so without one a B2 that never answers hangs `Close` and
+`Abort`. `TestB2Bucket_CancelLargeFileHasDeadline` guards it.
 
 Verified against a live bucket: before the fix a 150 MiB failing transfer
 left an entry in `b2_list_unfinished_large_files`; after it, three
