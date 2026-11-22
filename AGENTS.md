@@ -116,8 +116,8 @@ without storing anything** when the key begins with `/`
 
 Cancelling the write context alone is **not** enough. blazer only issues
 `b2_cancel_large_file` when the writer was created with
-`b2.WithCancelOnError`; otherwise `setErr` returns early at
-`if w.ctxf == nil` and the unfinished large file is left behind, billable
+`b2.WithCancelOnError`; otherwise `setErr` returns early on a nil `w.ctxf`
+and the unfinished large file is left behind, billable
 and invisible in a normal object listing. The cancel request also needs a
 context that outlives the cancelled one, hence `context.WithoutCancel`.
 
@@ -125,13 +125,12 @@ Verified against a live bucket: before the fix a 150 MiB failing transfer
 left an entry in `b2_list_unfinished_large_files`; after it, three
 consecutive runs left nothing.
 
-The option has a cost. With it, `setErr` cancels the large file on any
-error, through a nil `w.file` when none was started, and so panics
-(Backblaze/blazer#54). Under the 100 MB `ChunkSize` a refused, timed-out or
-aborted upload panics in `Close`; over it, a failed `b2_start_large_file`
-panics in `Write`. `b2Writer` recovers both and returns the error blazer
-recorded before panicking. Drop the wrapper, not the option, once a blazer
-release fixes #54: see `todo/013-drop-b2writer.md`.
+The option needs blazer v0.9.0 or later. Before it, `setErr` cancelled the
+large file on any error, through a nil `w.file` when none was started, and
+so panicked (Backblaze/blazer#54): under the 100 MB `ChunkSize` in `Close`
+when an upload was refused, timed out or aborted, and over it in `Write`
+when `b2_start_large_file` failed. `TestB2Bucket_FailedUploadReturnsError`
+fails on every one of those paths against a blazer without the fix.
 
 ### 6. `s3PipeWriter.Abort`'s ordering is load-bearing.
 
