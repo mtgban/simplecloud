@@ -453,19 +453,19 @@ func refusingB2(t *testing.T, opts ...b2.ClientOption) (*simplecloud.B2Bucket, *
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		self := "http://" + r.Host
 		switch r.URL.Path {
-		case "/b2api/v3/b2_authorize_account":
+		case "/b2api/v4/b2_authorize_account":
 			io.WriteString(w, `{"accountId": "id", "authorizationToken": "token", "apiInfo": {"storageApi": {"apiUrl": "`+self+`", "downloadUrl": "`+self+`"}}}`)
-		case "/b2api/v3/b2_list_buckets":
+		case "/b2api/v4/b2_list_buckets":
 			io.WriteString(w, `{"buckets": [{"bucketId": "id", "bucketName": "bucket"}]}`)
-		case "/b2api/v3/b2_get_upload_url":
+		case "/b2api/v4/b2_get_upload_url":
 			io.WriteString(w, `{"uploadUrl": "`+self+`/upload", "authorizationToken": "token"}`)
 		case "/upload":
 			uploads.Add(1)
 			fallthrough
-		case "/b2api/v3/b2_start_large_file":
+		case "/b2api/v4/b2_start_large_file":
 			w.WriteHeader(http.StatusBadRequest)
 			io.WriteString(w, `{"status": 400, "code": "bad_request", "message": "refused"}`)
-		case "/b2api/v3/b2_list_file_names":
+		case "/b2api/v4/b2_list_file_names":
 			serveB2List(w, r)
 		default:
 			http.NotFound(w, r)
@@ -569,7 +569,7 @@ func TestB2Bucket_UnrecordedPanicIsRaised(t *testing.T) {
 	})
 
 	t.Run("write", func(t *testing.T) {
-		transport := panickyTransport("/b2api/v3/b2_start_large_file")
+		transport := panickyTransport("/b2api/v4/b2_start_large_file")
 		bucket, _ := refusingB2(t, b2.Transport(transport), tinyChunks)
 		w, err := simplecloud.InitWriter(ctx, bucket, "dst.txt")
 		if err != nil {
